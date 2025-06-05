@@ -4,6 +4,7 @@ Neural network architecture for AlphaZero Reversi with JIT compilation support.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from typing import Tuple, Dict, Any, Optional
 import warnings
 
@@ -76,6 +77,7 @@ class AlphaZeroNetwork(nn.Module):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
     
+    @torch.jit.export
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the network.
@@ -95,39 +97,37 @@ class AlphaZeroNetwork(nn.Module):
             x = res_block(x)
         
         # Policy head
-        policy = F.relu(self.policy_bn(self.policy_conv(x)))
-        policy = policy.contiguous().view(policy.size(0), -1)  # Flatten with contiguity
+        policy = self.policy_conv(x)
+        policy = F.relu(self.policy_bn(policy))
+        batch_size = x.size(0)
+        policy = policy.contiguous().view(batch_size, -1)  # Flatten with contiguity
         policy = self.policy_fc(policy)
         
         # Value head
-        value = F.relu(self.value_bn(self.value_conv(x)))
-        value = value.contiguous().view(value.size(0), -1)  # Flatten with contiguity
+        value = self.value_conv(x)
+        value = F.relu(self.value_bn(value))
+        value = value.contiguous().view(batch_size, -1)  # Flatten with contiguity
         value = F.relu(self.value_fc1(value))
         value = torch.tanh(self.value_fc2(value))  # Output in [-1, 1]
         
         return policy, value.squeeze(1)  # Remove extra dimension from value
     
-    def compile(self, example_input: Optional[torch.Tensor] = None) -> None:
+    def compile(self) -> None:
         """
         Compile the model using TorchScript for improved performance.
-        
-        Args:
-            example_input: Example input tensor for tracing. If None, creates one.
+        Uses torch.jit.script for better compatibility with Python control flow.
         """
         if self._jit_compiled:
             return
             
-        if example_input is None:
-            # Create a batch of size 1 with the expected input shape
-            batch_size = 1
-            example_input = torch.randn(
-                batch_size, 3, self.board_size, self.board_size,
-                device=next(self.parameters()).device
-            )
-        
-        # Create a scripted version of the model
-        self._script_module = torch.jit.trace(self, example_input)
-        self._jit_compiled = True
+        try:
+            # Create a scripted version of the model
+            self._script_module = torch.jit.script(self)
+            self._jit_compiled = True
+        except Exception as e:
+            warnings.warn(f"JIT compilation failed: {str(e)}. Falling back to eager mode.")
+            self._script_module = None
+            self._jit_compiled = False
     
     @torch.jit.export
     def predict(self, board_state: torch.Tensor, valid_moves: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -137,34 +137,37 @@ class AlphaZeroNetwork(nn.Module):
         
         Args:
             board_state: Input tensor of shape (batch_size, 3, board_size, board_size)
-                        or numpy array of same shape
-            valid_moves: Optional tensor or numpy array of valid moves mask
-                        (not used in this implementation but kept for compatibility)
+            valid_moves: Optional tensor of valid moves (not used, kept for compatibility)
             
         Returns:
             Tuple of (policy_logits, value)
             - policy_logits: Tensor of shape (batch_size, board_size * board_size + 1)
             - value: Tensor of shape (batch_size,)
         """
-        # Convert numpy arrays to torch tensors if needed
-        if isinstance(board_state, np.ndarray):
-            device = next(self.parameters()).device
-            board_state = torch.from_numpy(board_state).float().to(device)
-        
-        # Ensure the input is on the correct device
-        board_state = board_state.to(next(self.parameters()).device)
-        
         # Add batch dimension if needed
         if board_state.dim() == 3:
             board_state = board_state.unsqueeze(0)
             
         # Forward pass through the model
         if self._jit_compiled and self._script_module is not None:
-            policy_logits, value = self._script_module.forward(board_state)
-        else:
-            policy_logits, value = self.forward(board_state)
+            return self._script_module.forward(board_state)
+        return self.forward(board_state)
+        
+    def predict_from_numpy(self, board_state: np.ndarray, valid_moves: Optional[np.ndarray] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Predict policy and value from numpy arrays.
+        This is a convenience method that handles numpy array conversion.
+        
+        Args:
+            board_state: Numpy array of shape (batch_size, 3, board_size, board_size)
+            valid_moves: Optional numpy array of valid moves (not used, kept for compatibility)
             
-        return policy_logits, value
+        Returns:
+            Tuple of (policy_logits, value)
+        """
+        device = next(self.parameters()).device
+        board_tensor = torch.from_numpy(board_state).float().to(device)
+        return self.predict(board_tensor)
     
     def to(self, *args, **kwargs):
         """Override to handle device changes with JIT compilation."""
@@ -183,11 +186,7 @@ class AlphaZeroNetwork(nn.Module):
         """Override eval to enable JIT compilation if not already compiled."""
         result = super().eval()
         if not self._jit_compiled and not self.training:
-            try:
-                self.compile()
-            except Exception as e:
-                import warnings
-                warnings.warn(f"JIT compilation failed: {str(e)}. Falling back to eager mode.")
+            self.compile()
         return result
 
     def make_prediction(self, board_state: np.ndarray, valid_moves: Optional[np.ndarray] = None) -> Tuple[np.ndarray, float]:
@@ -207,20 +206,19 @@ class AlphaZeroNetwork(nn.Module):
         # Ensure model is in eval mode and compiled if possible
         self.eval()
         
-        # Convert to tensor and add batch dimension
-        device = next(self.parameters()).device
-        board_tensor = torch.from_numpy(board_state).float().to(device)
+        # Add batch dimension if needed
+        if board_state.ndim == 3:
+            board_state = np.expand_dims(board_state, axis=0)
         
         with torch.no_grad():
-            # Use the predict method which handles both JIT and eager modes
-            policy_logits, value = self.predict(board_tensor)
+            # Use predict_from_numpy which handles the numpy to tensor conversion
+            policy_logits, value = self.predict_from_numpy(board_state)
             
             # Convert to probabilities
             action_probs = F.softmax(policy_logits.squeeze(0), dim=0)
             value = value.item()
             
-            # Convert to numpy if needed
-            if torch.is_tensor(action_probs):
-                action_probs = action_probs.cpu().numpy()
+            # Convert to numpy
+            action_probs = action_probs.cpu().numpy()
             
         return action_probs, value

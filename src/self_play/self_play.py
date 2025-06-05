@@ -86,7 +86,7 @@ class SelfPlay:
                     temperature=self.args.get('temperature', 1.0)
                 )
                 
-                # Save state and action probabilities
+                # Add current state and action probabilities
                 game_data['action_probs'].append(action_probs)
                 
                 # Make the move
@@ -99,8 +99,12 @@ class SelfPlay:
                 # Update MCTS tree
                 self.mcts.update_with_move(action)
                 
-                # Add new state to game data
+                # Add new state to game data (for the next iteration)
                 self._add_state_to_game_data(game, game_data)
+                
+                # If the game ended after this move, we need to add the final state
+                if game.is_game_over():
+                    self._add_state_to_game_data(game, game_data)
             
             # Determine the winner
             winner = game.get_winner()

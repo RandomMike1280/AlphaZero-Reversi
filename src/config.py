@@ -20,19 +20,19 @@ class ModelConfig:
 @dataclass
 class MCTSConfig:
     """Configuration for Monte Carlo Tree Search."""
-    num_simulations: int = 800
+    num_simulations: int = 500
     c_puct: float = 1.0
     dirichlet_alpha: float = 0.03
     dirichlet_epsilon: float = 0.25
     temperature: float = 1.0
     temperature_threshold: int = 30  # Switch to deterministic after this many moves
-    num_parallel: int = 4  # Number of parallel MCTS simulations
+    num_parallel: int = 6  # Number of parallel MCTS simulations
 
 @dataclass
 class SelfPlayConfig:
     """Configuration for self-play data generation."""
     num_games: int = 100
-    num_parallel_games: int = 4
+    num_parallel_games: int = 6
     save_dir: str = "self_play_data"
     save_every: int = 10  # Save games every N iterations
     max_moves: int = 200  # Maximum moves per game before declaring a draw
@@ -62,8 +62,8 @@ class TrainingConfig:
 @dataclass
 class TournamentConfig:
     """Configuration for model tournaments."""
-    rounds: int = 10
-    num_simulations: int = 400
+    rounds: int = 20
+    num_simulations: int = 500
     c_puct: float = 1.0
     output_dir: str = "tournament_results"
     elo_file: str = "elo_ratings.json"

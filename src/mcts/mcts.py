@@ -193,7 +193,7 @@ class MCTS:
     """
     
     def __init__(self, model, c_puct: float = 1.0, num_simulations: int = 800, 
-                 batch_size: int = 16, num_threads: int = 1, use_transposition: bool = True):
+                 batch_size: int = 64, num_threads: int = 1, use_transposition: bool = True):
         """
         Initialize the MCTS with optimizations.
         

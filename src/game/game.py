@@ -134,6 +134,16 @@ class ReversiGame:
         """
         return self.move_history.copy()
     
+    def copy(self) -> 'ReversiGame':
+        """Create a deep copy of the game."""
+        new_game = ReversiGame(self.size)
+        new_game.board = self.board.copy()
+        new_game.current_player = self.current_player
+        new_game.game_over = self.game_over
+        new_game.winner = self.winner
+        new_game.move_history = self.move_history.copy()
+        return new_game
+        
     def __str__(self) -> str:
         """String representation of the game state."""
         symbols = {Board.EMPTY: '.', Board.BLACK: 'B', Board.WHITE: 'W'}

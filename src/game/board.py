@@ -276,8 +276,18 @@ class Board:
         new_board.move_history = self.move_history.copy()
         return new_board
     
+    def copy(self) -> 'Board':
+        """Create a deep copy of the board."""
+        new_board = Board(self.size)
+        new_board.board = self.board.copy()
+        new_board.current_player = self.current_player
+        new_board.game_over = self.game_over
+        new_board.winner = self.winner
+        new_board.move_history = self.move_history.copy()
+        return new_board
+        
     def __str__(self) -> str:
-        """String representation of the board for debugging."""
+        """String representation of the board."""
         symbols = {self.EMPTY: '.', self.BLACK: 'B', self.WHITE: 'W'}
         rows = []
         
@@ -289,5 +299,17 @@ class Board:
             for j in range(self.size):
                 row.append(symbols[self.board[i][j]])
             rows.append(' '.join(row))
-            
+        
+        # Add current player and score
+        rows.append(f"\nCurrent player: {'Black' if self.current_player == self.BLACK else 'White'}")
+        black, white = self.get_score()
+        rows.append(f"Score - Black: {black}, White: {white}")
+        
+        if self.game_over:
+            if self.winner == 0:
+                rows.append("Game over! It's a draw!")
+            else:
+                winner = 'Black' if self.winner == self.BLACK else 'White'
+                rows.append(f"Game over! {winner} wins!")
+        
         return '\n'.join(rows)

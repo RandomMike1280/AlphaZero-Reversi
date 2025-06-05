@@ -1,23 +1,46 @@
 """
-Monte Carlo Tree Search (MCTS) implementation for AlphaZero.
+Monte Carlo Tree Search (MCTS) implementation for AlphaZero with transposition tables.
 """
 import math
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 import torch
 import torch.nn.functional as F
+from collections import defaultdict
+
+# Define a transposition table entry
+class TranspositionTableEntry:
+    """Entry in the transposition table."""
+    __slots__ = ['value', 'depth', 'node_type', 'best_move']
+    
+    def __init__(self, value: float, depth: int, node_type: str, best_move: Optional[Tuple[int, int]] = None):
+        """
+        Initialize a transposition table entry.
+        
+        Args:
+            value: The value of the node
+            depth: The depth of the search that produced this value
+            node_type: 'EXACT', 'LOWER_BOUND', or 'UPPER_BOUND'
+            best_move: The best move found at this node
+        """
+        self.value = value
+        self.depth = depth
+        self.node_type = node_type
+        self.best_move = best_move
 
 class MCTSNode:
-    """A node in the Monte Carlo search tree with optimizations."""
+    """A node in the Monte Carlo search tree with optimizations and transposition table support."""
     
     __slots__ = [
         'visit_count', 'value_sum', 'prior', 'turn', 'move', 'parent', 
         'children', 'state', 'virtual_loss', 'valid_moves', 'is_terminal',
-        'terminal_value', 'cached_ucb'
+        'terminal_value', 'cached_ucb', 'zobrist_hash', 'transposition_key',
+        'best_child_move'
     ]
     
     def __init__(self, prior: float, turn: int, move: Optional[Tuple[int, int]] = None, 
-                 parent: 'MCTSNode' = None, valid_moves: Optional[List[Tuple[int, int]]] = None):
+                 parent: 'MCTSNode' = None, valid_moves: Optional[List[Tuple[int, int]]] = None,
+                 zobrist_hash: Optional[int] = None):
         """
         Initialize a new node.
         
@@ -27,6 +50,7 @@ class MCTSNode:
             move: The move that led to this node (None for root)
             parent: The parent node (None for root)
             valid_moves: List of valid moves from this node
+            zobrist_hash: Zobrist hash of the board state at this node
         """
         self.visit_count = 0
         self.value_sum = 0.0
@@ -41,6 +65,9 @@ class MCTSNode:
         self.is_terminal = False
         self.terminal_value = None
         self.cached_ucb = -float('inf')
+        self.zobrist_hash = zobrist_hash  # Zobrist hash of the board state
+        self.transposition_key = None  # Key used in transposition table
+        self.best_child_move = None  # Best move found during search
     
     def expanded(self) -> bool:
         """Check if the node has been expanded (has children)."""
@@ -161,11 +188,12 @@ class MCTSNode:
 
 class MCTS:
     """
-    Optimized Monte Carlo Tree Search for AlphaZero with batched inference and path backpropagation.
+    Optimized Monte Carlo Tree Search for AlphaZero with transposition tables,
+    batched inference, and path backpropagation.
     """
     
     def __init__(self, model, c_puct: float = 1.0, num_simulations: int = 800, 
-                 batch_size: int = 16, num_threads: int = 1):
+                 batch_size: int = 16, num_threads: int = 1, use_transposition: bool = True):
         """
         Initialize the MCTS with optimizations.
         
@@ -175,6 +203,7 @@ class MCTS:
             num_simulations: Number of simulations to run per move
             batch_size: Number of leaf nodes to process in parallel
             num_threads: Number of threads for parallel simulations (not yet implemented)
+            use_transposition: Whether to use transposition tables
         """
         self.model = model
         self.device = next(model.parameters()).device
@@ -183,13 +212,105 @@ class MCTS:
         self.batch_size = batch_size
         self.root = None
         self.lock = None  # Will be initialized if using threads
+        self.use_transposition = use_transposition
+        
+        # Transposition table: maps zobrist_hash -> TranspositionTableEntry
+        self.transposition_table = {}
+        
+        # Cache for board states we've seen before
+        self.state_cache = {}
         
         # Ensure model is in eval mode
         self.model.eval()
     
+    def _get_transposition_key(self, node: MCTSNode, depth: int) -> int:
+        """
+        Generate a transposition table key for the given node and search depth.
+        
+        Args:
+            node: The node to generate a key for
+            depth: Current search depth
+            
+        Returns:
+            A unique key for the transposition table
+        """
+        if node.zobrist_hash is None:
+            return None
+            
+        # Combine hash with depth for more precise matching
+        return (node.zobrist_hash, depth, node.turn)
+    
+    def _lookup_transposition(self, node: MCTSNode, depth: int, alpha: float, beta: float) -> Optional[float]:
+        """
+        Look up a node in the transposition table.
+        
+        Args:
+            node: The node to look up
+            depth: Current search depth
+            alpha: Alpha value for alpha-beta pruning
+            beta: Beta value for alpha-beta pruning
+            
+        Returns:
+            The value from the transposition table if found, else None
+        """
+        if not self.use_transposition or node.zobrist_hash is None:
+            return None
+            
+        key = self._get_transposition_key(node, depth)
+        if key is None:
+            return None
+            
+        entry = self.transposition_table.get(key)
+        if entry is None:
+            return None
+            
+        # Only use the entry if it's from a search at least as deep as ours
+        if entry.depth >= depth:
+            if entry.node_type == 'EXACT':
+                return entry.value
+            elif entry.node_type == 'LOWER_BOUND' and entry.value >= beta:
+                return entry.value
+            elif entry.node_type == 'UPPER_BOUND' and entry.value <= alpha:
+                return entry.value
+                
+        # If we have a best move from the transposition table, use it
+        if entry.best_move is not None and entry.best_move in node.children:
+            node.best_child_move = entry.best_move
+            
+        return None
+    
+    def _store_transposition(self, node: MCTSNode, depth: int, value: float, 
+                           node_type: str, best_move: Optional[Tuple[int, int]] = None) -> None:
+        """
+        Store a node in the transposition table.
+        
+        Args:
+            node: The node to store
+            depth: The depth of the search that produced this value
+            value: The value to store
+            node_type: 'EXACT', 'LOWER_BOUND', or 'UPPER_BOUND'
+            best_move: The best move found at this node
+        """
+        if not self.use_transposition or node.zobrist_hash is None:
+            return
+            
+        key = self._get_transposition_key(node, depth)
+        if key is None:
+            return
+            
+        # Only store if we don't have a deeper search already
+        existing = self.transposition_table.get(key)
+        if existing is None or existing.depth <= depth:
+            self.transposition_table[key] = TranspositionTableEntry(
+                value=value,
+                depth=depth,
+                node_type=node_type,
+                best_move=best_move
+            )
+    
     def search(self, game) -> Dict[Tuple[int, int], int]:
         """
-        Run MCTS from the current game state with batched simulations.
+        Run MCTS from the current game state with batched simulations and transposition tables.
         
         Args:
             game: The current game state
@@ -197,32 +318,82 @@ class MCTS:
         Returns:
             Dictionary mapping actions to their visit counts
         """
-        if self.root is None:
-            self.root = MCTSNode(1.0, game.current_player, valid_moves=game.get_valid_moves())
+        # Reset the root node with Zobrist hash if available
+        zobrist_hash = getattr(game, 'get_zobrist_hash', lambda: None)()
+        self.root = MCTSNode(
+            1.0, 
+            game.current_player, 
+            None, 
+            None, 
+            game.get_valid_moves(),
+            zobrist_hash
+        )
         
-        # Run batched simulations
-        leaf_batch = {}
-        for _ in range(self.num_simulations):
-            game_copy = game.copy()
-            path = []
+        # Clear the transposition table if it's too large
+        if len(self.transposition_table) > 1000000:  # Arbitrary limit
+            self.transposition_table.clear()
+        
+        # Run simulations in batches
+        for _ in range(0, self.num_simulations, self.batch_size):
+            batch_size = min(self.batch_size, self.num_simulations - _)
             
-            # Selection and expansion
-            node, game_copy = self._traverse(game_copy, path)
+            # Collect a batch of leaf nodes to evaluate
+            leaf_nodes = []
+            paths = []
             
-            # Add to batch if not terminal
-            if not node.is_terminal and node not in leaf_batch:
-                leaf_batch[node] = (game_copy, path)
+            for _ in range(batch_size):
+                # Make a copy of the game for simulation
+                sim_game = game.copy()
                 
-                # Process batch if full
-                if len(leaf_batch) >= self.batch_size:
-                    self._process_batch(leaf_batch)
-                    leaf_batch = {}
+                # Traverse the tree to find a leaf node
+                path = []
+                node, sim_game = self._traverse(sim_game, path)
+                
+                # If we've reached a terminal state, backpropagate immediately
+                if node.is_terminal:
+                    self._backpropagate_path(path, node.terminal_value)
+                    continue
+                
+                # Check transposition table for this node
+                if self.use_transposition and hasattr(sim_game, 'get_symmetry_hashes'):
+                    # Try to find a transposition for any symmetric position
+                    for sym_hash in sim_game.get_symmetry_hashes():
+                        # Create a temporary node with the symmetric hash
+                        temp_node = MCTSNode(1.0, sim_game.current_player, None, None, None, sym_hash)
+                        temp_key = self._get_transposition_key(temp_node, 0)  # Depth 0 for now
+                        
+                        if temp_key in self.transposition_table:
+                            entry = self.transposition_table[temp_key]
+                            # Use the value from the transposition table
+                            self._backpropagate_path(path, entry.value)
+                            break
+                    else:
+                        # No transposition found, add to batch for evaluation
+                        leaf_nodes.append((node, sim_game, path))
+                else:
+                    # No transposition table support, just add to batch
+                    leaf_nodes.append((node, sim_game, path))
+            
+            # Process the batch of leaf nodes
+            if leaf_nodes:
+                # Convert list of tuples to the format expected by _process_batch
+                batch_data = [(node, game, path) for node, game, path in leaf_nodes]
+                self._process_batch(batch_data)
         
-        # Process remaining leaves
-        if leaf_batch:
-            self._process_batch(leaf_batch)
+        # Store best move in the transposition table
+        if self.use_transposition and self.root.zobrist_hash is not None and self.root.children:
+            best_move = max(self.root.children.items(), key=lambda x: x[1].visit_count)[0]
+            self._store_transposition(
+                self.root, 
+                depth=0,  # Root level
+                value=self.root.value(),
+                node_type='EXACT',
+                best_move=best_move
+            )
         
-        return self.root.get_visit_counts()
+        # Return the visit counts of the root's children
+        return {move: child.visit_count 
+                for move, child in self.root.children.items()}
     
     def _traverse(self, game, path: List[MCTSNode]) -> Tuple[MCTSNode, Any]:
         """Traverse the tree until a leaf node is found."""
@@ -261,7 +432,7 @@ class MCTS:
         
         return node, game
     
-    def _process_batch(self, leaf_batch: Dict[MCTSNode, Tuple[Any, List[MCTSNode]]]):
+    def _process_batch(self, leaf_batch: List[Tuple[MCTSNode, Any, List[MCTSNode]]]):
         """Process a batch of leaf nodes in parallel."""
         if not leaf_batch:
             return
@@ -271,7 +442,7 @@ class MCTS:
         paths = []
         nodes = []
         
-        for node, (game_copy, path) in leaf_batch.items():
+        for node, game_copy, path in leaf_batch:
             # Get valid moves if not already cached
             if node.valid_moves is None:
                 node.valid_moves = game_copy.get_valid_moves()

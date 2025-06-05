@@ -217,7 +217,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Benchmark MCTS performance')
     parser.add_argument('--board-size', type=int, default=8, help='Board size')
-    parser.add_argument('--simulations', type=int, default=100, help='Number of MCTS simulations')
+    parser.add_argument('--simulations', type=int, default=800, help='Number of MCTS simulations')
     parser.add_argument('--runs', type=int, default=5, help='Number of runs per configuration')
     parser.add_argument('--batch-sizes', type=int, nargs='+', default=[1, 8, 16, 32],
                        help='Batch sizes to test')

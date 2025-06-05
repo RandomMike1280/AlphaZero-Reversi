@@ -59,31 +59,49 @@ def test_make_move():
 
 def test_game_over():
     """Test game over condition by filling the board completely."""
-    # Create a small board for testing
-    game = ReversiGame(4)
+    # Create a standard 8x8 board for testing
+    game = ReversiGame(8)
     
-    # Set up a board that's one move away from being full
-    # B = Black, W = White, . = Empty
-    # Current board:
-    # W W W W
-    # W W W W
-    # W W W W
-    # W W B .  <- One empty space left, White's turn
+    # Set up a board where there's only one empty square and one valid move
+    # that will end the game
     
-    # Fill the board with white pieces except for one spot and one black piece
-    game.board.board = np.full((4, 4), game.board.WHITE, dtype=np.int8)
-    game.board.board[3, 2] = game.board.BLACK  # One black piece that can be captured
-    game.board.board[3, 3] = game.board.EMPTY  # One empty space
-    game.current_player = game.board.WHITE  # White's turn
+    # First, reset the board to a known state
+    game.board.black = 0x0000000000000000
+    game.board.white = 0x0000000000000000
+    game.current_player = game.board.BLACK
     game.game_over = False
+    
+    # Set up a position where there's only one empty square at (0,0)
+    # and one black piece at (0,1) that can be captured by white
+    game.board.black = 0x0000000000000002  # Black piece at (0,1)
+    game.board.white = 0x0000000000000000  # No white pieces initially
+    
+    # Fill the rest of the board with alternating colors
+    for i in range(8):
+        for j in range(8):
+            if i > 0 or j > 1:  # Skip the first two positions we just set
+                pos = i * 8 + j
+                if (i + j) % 2 == 0:
+                    game.board.white |= (1 << pos)
+                else:
+                    game.board.black |= (1 << pos)
+    
+    # Make sure (0,0) is empty and (0,1) is black
+    game.board.black &= ~0x0000000000000001  # Clear (0,0)
+    game.board.white &= ~0x0000000000000002  # Clear (0,1)
+    game.board.black |= 0x0000000000000002   # Set (0,1) to black
+    
+    # It's white's turn to move
+    game.current_player = game.board.WHITE
+    
+    # Update the board state
+    game.board._update_board_state()
     
     print("\nInitial board:")
     print(game)
     
     # Make the final move to fill the board - this should capture the black piece
-    print("\nMaking final move to fill the board...")
-    # White places a piece in the empty space, capturing the black piece
-    assert game.make_move(3, 3), "Final move should be valid"
+    assert game.make_move(0, 0), "Final move should be valid"
     
     print("\nFinal board:")
     print(game)
@@ -95,8 +113,8 @@ def test_game_over():
     assert game.is_game_over(), "Game should be over after filling the board"
     
     # The winner should be White since the board is all white
-    black_count = np.sum(game.board.board == game.board.BLACK)
-    white_count = np.sum(game.board.board == game.board.WHITE)
+    black_count = game.board.bit_count(game.board.black)
+    white_count = game.board.bit_count(game.board.white)
     expected_winner = game.board.WHITE  # Should be all white pieces
     
     print(f"\nFinal score - Black: {black_count}, White: {white_count}")

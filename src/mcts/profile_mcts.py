@@ -182,7 +182,7 @@ def main():
         print("\n" + "="*50)
         print("PROFILING MCTS SEARCH")
         print("="*50)
-        profiler.profile_search(num_searches=min(10, args.simulations))
+        profiler.profile_search(num_searches=min(100, args.simulations))
     
     if args.profile in ['nodes', 'all']:
         print("\n" + "="*50)
@@ -196,7 +196,7 @@ def main():
         print("="*50)
         profiler.profile_batch_processing(
             batch_size=args.batch_size,
-            num_batches=10
+            num_batches=64
         )
 
 

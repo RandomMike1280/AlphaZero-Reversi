@@ -114,7 +114,8 @@ class ReversiGame:
         Returns:
             2D numpy array representing the board state
         """
-        return self.board.board.copy()
+        self.board._ensure_board_updated()
+        return self.board._board.copy()
     
     def get_current_player(self) -> int:
         """
@@ -146,28 +147,20 @@ class ReversiGame:
         
     def __str__(self) -> str:
         """String representation of the game state."""
-        symbols = {Board.EMPTY: '.', Board.BLACK: 'B', Board.WHITE: 'W'}
-        rows = []
+        # Delegate to the Board's __str__ method
+        result = str(self.board)
         
-        # Add column headers
-        rows.append('  ' + ' '.join(str(i) for i in range(self.size)))
+        # Add current player and score if not already included
+        if "Current player:" not in result:
+            result += f"\nCurrent player: {'Black' if self.current_player == Board.BLACK else 'White'}"
+            black, white = self.get_score()
+            result += f"\nScore - Black: {black}, White: {white}"
+            
+            if self.game_over:
+                if self.winner == 0:
+                    result += "\nGame over! It's a draw!"
+                else:
+                    winner = 'Black' if self.winner == Board.BLACK else 'White'
+                    result += f"\nGame over! {winner} wins!"
         
-        for i in range(self.size):
-            row = [str(i)]
-            for j in range(self.size):
-                row.append(symbols[self.board.board[i][j]])
-            rows.append(' '.join(row))
-        
-        # Add current player and score
-        rows.append(f"\nCurrent player: {'Black' if self.current_player == Board.BLACK else 'White'}")
-        black, white = self.get_score()
-        rows.append(f"Score - Black: {black}, White: {white}")
-        
-        if self.game_over:
-            if self.winner == 0:
-                rows.append("Game over! It's a draw!")
-            else:
-                winner = 'Black' if self.winner == Board.BLACK else 'White'
-                rows.append(f"Game over! {winner} wins!")
-        
-        return '\n'.join(rows)
+        return result

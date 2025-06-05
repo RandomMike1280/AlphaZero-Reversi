@@ -83,7 +83,10 @@ class SelfPlay:
                     temperature=self.args.get('temperature', 1.0)
                 )
                 
-                # Add current state and action probabilities
+                # Add the current state (before the move)
+                self._add_state_to_game_data(game, game_data)
+                
+                # Add the action probabilities for the current state
                 game_data['action_probs'].append(action_probs)
                 
                 # Make the move
@@ -95,9 +98,6 @@ class SelfPlay:
                 
                 # Update MCTS tree
                 self.mcts.update_with_move(action)
-                
-                # Add the state that we made the move from (before the move)
-                self._add_state_to_game_data(game, game_data)
             
             # Determine the winner
             winner = game.get_winner()
@@ -106,8 +106,15 @@ class SelfPlay:
             elif winner == 0:  # Draw
                 winner = 0
             
-            # Set the winner for all states in the game
-            game_data['winners'] = [winner] * len(game_data['states'])
+            # Ensure we have the same number of states and action probabilities
+            min_length = min(len(game_data['states']), len(game_data['action_probs']))
+            
+            # Truncate both lists to the minimum length
+            game_data['states'] = game_data['states'][:min_length]
+            game_data['action_probs'] = game_data['action_probs'][:min_length]
+            
+            # Add the winner to each state in the game
+            game_data['winners'] = [winner] * min_length
             
             # Save the game data
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

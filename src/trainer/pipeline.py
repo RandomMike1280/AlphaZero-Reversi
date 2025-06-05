@@ -172,17 +172,48 @@ class AlphaZeroPipeline:
         policy_targets = []
         value_targets = []
         
-        for game in games:
-            for i in range(len(game['states'])):
-                states.append(game['states'][i])
-                policy_targets.append(game['action_probs'][i])
-                value_targets.append(game['winners'][i])
+        for game_idx, game in enumerate(games):
+            game_states = game['states']
+            game_action_probs = game['action_probs']
+            game_winners = game['winners']
+            
+            # Debug info
+            print(f"Game {game_idx}: {len(game_states)} states, {len(game_action_probs)} action_probs, {len(game_winners)} winners")
+            
+            # Check for any mismatched lengths within the same game
+            min_length = min(len(game_states), len(game_action_probs), len(game_winners))
+            if min_length == 0:
+                print(f"Warning: Game {game_idx} has no valid data")
+                continue
+                
+            # Only use the data that has matching lengths
+            for i in range(min_length):
+                states.append(game_states[i])
+                policy_targets.append(game_action_probs[i])
+                value_targets.append(game_winners[i])
         
-        return {
-            'states': np.array(states, dtype=np.float32),
-            'policy_targets': np.array(policy_targets, dtype=np.float32),
-            'value_targets': np.array(value_targets, dtype=np.float32)
-        }
+        # Convert to numpy arrays
+        try:
+            states_array = np.array(states, dtype=np.float32)
+            policy_array = np.array(policy_targets, dtype=np.float32)
+            value_array = np.array(value_targets, dtype=np.float32)
+            
+            print(f"Generated training data: {len(states_array)} samples")
+            print(f"States shape: {states_array.shape}")
+            print(f"Policy targets shape: {policy_array.shape}")
+            print(f"Value targets shape: {value_array.shape}")
+            
+            return {
+                'states': states_array,
+                'policy_targets': policy_array,
+                'value_targets': value_array
+            }
+        except Exception as e:
+            print(f"Error converting to numpy arrays: {e}")
+            print(f"States length: {len(states)}")
+            print(f"Policy targets length: {len(policy_targets)}")
+            print(f"Value targets length: {len(value_targets)}")
+            raise
     
     def _train_epoch(self, train_data: Dict[str, np.ndarray]) -> Dict[str, float]:
         """Train the model for one epoch."""

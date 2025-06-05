@@ -1,10 +1,14 @@
 """
-Neural network architecture for AlphaZero Reversi.
+Neural network architecture for AlphaZero Reversi with JIT compilation support.
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple
+from typing import Tuple, Dict, Any, Optional
+import warnings
+
+# Suppress JIT warnings for cleaner output
+warnings.filterwarnings('ignore', message='.*JIT-compiled functions cannot take variable number of arguments.*')
 
 class ResBlock(nn.Module):
     """Residual block with two convolutional layers and batch normalization."""
@@ -23,7 +27,7 @@ class ResBlock(nn.Module):
         return F.relu(out)
 
 class AlphaZeroNetwork(nn.Module):
-    """AlphaZero neural network for Reversi."""
+    """AlphaZero neural network for Reversi with JIT compilation support."""
     
     def __init__(self, board_size: int = 8, num_res_blocks: int = 5, num_filters: int = 128):
         """
@@ -36,13 +40,14 @@ class AlphaZeroNetwork(nn.Module):
         """
         super().__init__()
         self.board_size = board_size
+        self.num_filters = num_filters
         
         # Initial convolution
         self.conv = nn.Conv2d(3, num_filters, kernel_size=3, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(num_filters)
         
         # Residual tower
-        self.res_blocks = nn.Sequential(*[ResBlock(num_filters) for _ in range(num_res_blocks)])
+        self.res_blocks = nn.ModuleList([ResBlock(num_filters) for _ in range(num_res_blocks)])
         
         # Policy head
         self.policy_conv = nn.Conv2d(num_filters, 2, kernel_size=1, bias=False)
@@ -57,6 +62,10 @@ class AlphaZeroNetwork(nn.Module):
         
         # Initialize weights
         self._initialize_weights()
+        
+        # JIT-related attributes
+        self._jit_compiled = False
+        self._script_module = None
     
     def _initialize_weights(self):
         """Initialize weights using Kaiming initialization."""
@@ -82,53 +91,136 @@ class AlphaZeroNetwork(nn.Module):
         x = F.relu(self.bn(self.conv(x)))
         
         # Residual tower
-        x = self.res_blocks(x)
+        for res_block in self.res_blocks:
+            x = res_block(x)
         
         # Policy head
         policy = F.relu(self.policy_bn(self.policy_conv(x)))
-        policy = policy.view(policy.size(0), -1)  # Flatten
+        policy = policy.contiguous().view(policy.size(0), -1)  # Flatten with contiguity
         policy = self.policy_fc(policy)
         
         # Value head
         value = F.relu(self.value_bn(self.value_conv(x)))
-        value = value.view(value.size(0), -1)  # Flatten
+        value = value.contiguous().view(value.size(0), -1)  # Flatten with contiguity
         value = F.relu(self.value_fc1(value))
         value = torch.tanh(self.value_fc2(value))  # Output in [-1, 1]
         
         return policy, value.squeeze(1)  # Remove extra dimension from value
     
-    def predict(self, board_state: 'np.ndarray', valid_moves: 'np.ndarray' = None) -> Tuple['np.ndarray', float]:
+    def compile(self, example_input: Optional[torch.Tensor] = None) -> None:
+        """
+        Compile the model using TorchScript for improved performance.
+        
+        Args:
+            example_input: Example input tensor for tracing. If None, creates one.
+        """
+        if self._jit_compiled:
+            return
+            
+        if example_input is None:
+            # Create a batch of size 1 with the expected input shape
+            batch_size = 1
+            example_input = torch.randn(
+                batch_size, 3, self.board_size, self.board_size,
+                device=next(self.parameters()).device
+            )
+        
+        # Create a scripted version of the model
+        self._script_module = torch.jit.trace(self, example_input)
+        self._jit_compiled = True
+    
+    @torch.jit.export
+    def predict(self, board_state: torch.Tensor, valid_moves: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Predict policy and value for the given board state.
+        Compatible with both JIT and eager modes.
+        
+        Args:
+            board_state: Input tensor of shape (batch_size, 3, board_size, board_size)
+                        or numpy array of same shape
+            valid_moves: Optional tensor or numpy array of valid moves mask
+                        (not used in this implementation but kept for compatibility)
+            
+        Returns:
+            Tuple of (policy_logits, value)
+            - policy_logits: Tensor of shape (batch_size, board_size * board_size + 1)
+            - value: Tensor of shape (batch_size,)
+        """
+        # Convert numpy arrays to torch tensors if needed
+        if isinstance(board_state, np.ndarray):
+            device = next(self.parameters()).device
+            board_state = torch.from_numpy(board_state).float().to(device)
+        
+        # Ensure the input is on the correct device
+        board_state = board_state.to(next(self.parameters()).device)
+        
+        # Add batch dimension if needed
+        if board_state.dim() == 3:
+            board_state = board_state.unsqueeze(0)
+            
+        # Forward pass through the model
+        if self._jit_compiled and self._script_module is not None:
+            policy_logits, value = self._script_module.forward(board_state)
+        else:
+            policy_logits, value = self.forward(board_state)
+            
+        return policy_logits, value
+    
+    def to(self, *args, **kwargs):
+        """Override to handle device changes with JIT compilation."""
+        self._jit_compiled = False
+        self._script_module = None
+        return super().to(*args, **kwargs)
+    
+    def train(self, mode: bool = True):
+        """Override train to disable JIT when in training mode."""
+        if mode and self._jit_compiled:
+            self._jit_compiled = False
+            self._script_module = None
+        return super().train(mode)
+    
+    def eval(self):
+        """Override eval to enable JIT compilation if not already compiled."""
+        result = super().eval()
+        if not self._jit_compiled and not self.training:
+            try:
+                self.compile()
+            except Exception as e:
+                import warnings
+                warnings.warn(f"JIT compilation failed: {str(e)}. Falling back to eager mode.")
+        return result
+
+    def make_prediction(self, board_state: np.ndarray, valid_moves: Optional[np.ndarray] = None) -> Tuple[np.ndarray, float]:
         """
         Make a prediction for a single board state.
         
         Args:
-            board_state: Board state as a numpy array of shape (board_size, board_size)
-                        with values: 0=empty, 1=player, 2=opponent
-            valid_moves: Optional mask of valid moves (1 for valid, 0 for invalid)
+            board_state: Numpy array of shape (3, board_size, board_size)
+                        representing [player_pieces, opponent_pieces, valid_moves]
+            valid_moves: Optional mask of valid moves (not used in this implementation)
             
         Returns:
-            Tuple of (policy_probs, value)
+            Tuple of (action_probs, value)
+            - action_probs: Numpy array of shape (board_size * board_size + 1,)
+            - value: float in [-1, 1]
         """
-        import numpy as np
+        # Ensure model is in eval mode and compiled if possible
+        self.eval()
         
         # Convert to tensor and add batch dimension
-        player_pieces = (board_state == 1).astype(np.float32)
-        opponent_pieces = (board_state == 2).astype(np.float32)
+        device = next(self.parameters()).device
+        board_tensor = torch.from_numpy(board_state).float().to(device)
         
-        if valid_moves is None:
-            valid_moves = np.ones_like(board_state, dtype=np.float32)
-        else:
-            valid_moves = valid_moves.astype(np.float32)
-        
-        # Stack into input tensor (3, board_size, board_size)
-        x = np.stack([player_pieces, opponent_pieces, valid_moves], axis=0)
-        x = torch.from_numpy(x).unsqueeze(0).to(next(self.parameters()).device)
-        
-        # Forward pass
-        self.eval()
         with torch.no_grad():
-            policy_logits, value = self(x)
-            policy_probs = F.softmax(policy_logits, dim=1).squeeze(0).cpu().numpy()
+            # Use the predict method which handles both JIT and eager modes
+            policy_logits, value = self.predict(board_tensor)
+            
+            # Convert to probabilities
+            action_probs = F.softmax(policy_logits.squeeze(0), dim=0)
             value = value.item()
-        
-        return policy_probs, value
+            
+            # Convert to numpy if needed
+            if torch.is_tensor(action_probs):
+                action_probs = action_probs.cpu().numpy()
+            
+        return action_probs, value

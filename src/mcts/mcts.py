@@ -486,7 +486,8 @@ class MCTS:
         with torch.no_grad():
             policy_logits, values = self.model(states_tensor)
             policy_probs = F.softmax(policy_logits, dim=1).cpu().numpy()
-            values = values.squeeze(1).cpu().numpy()
+            # The model's forward already returns squeezed values, so no need to squeeze again
+            values = values.cpu().numpy()
         
         # Process each node in the batch
         for i, (node, path) in enumerate(zip(nodes, paths)):

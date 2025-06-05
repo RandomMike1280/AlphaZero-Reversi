@@ -31,7 +31,7 @@ class MCTSConfig:
 @dataclass
 class SelfPlayConfig:
     """Configuration for self-play data generation."""
-    num_games: int = 100
+    num_games: int = 30
     num_parallel_games: int = 6
     save_dir: str = "self_play_data"
     save_every: int = 10  # Save games every N iterations

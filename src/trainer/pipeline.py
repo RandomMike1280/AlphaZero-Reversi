@@ -133,13 +133,18 @@ class AlphaZeroPipeline:
     
     def _generate_self_play_data(self) -> Dict[str, np.ndarray]:
         """Generate self-play data using the current model."""
+        self_play_args = {
+            'num_simulations': self.config.mcts.num_simulations,
+            'c_puct': self.config.mcts.c_puct,
+            'temperature': self.config.mcts.temperature,
+            'dirichlet_alpha': self.config.mcts.dirichlet_alpha,
+            'dirichlet_epsilon': self.config.mcts.dirichlet_epsilon,
+            'num_parallel_games': self.config.self_play.num_parallel_games,
+            'save_dir': self.config.self_play.save_dir
+        }
         self_play = SelfPlay(
             model=self.model,
-            num_simulations=self.config.mcts.num_simulations,
-            c_puct=self.config.mcts.c_puct,
-            temperature=self.config.mcts.temperature,
-            num_parallel_games=self.config.self_play.num_parallel_games,
-            device=self.device
+            args=self_play_args
         )
         
         # Generate games

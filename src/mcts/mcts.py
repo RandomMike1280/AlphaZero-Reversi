@@ -139,6 +139,7 @@ class MCTS:
             num_simulations: Number of simulations to run per move
         """
         self.model = model
+        self.device = next(model.parameters()).device
         self.c_puct = c_puct
         self.num_simulations = num_simulations
         self.root = None
@@ -225,8 +226,20 @@ class MCTS:
         for row, col in valid_moves:
             valid_moves_mask[row, col] = 1.0
         
-        # Convert to tensor and add batch dimension
-        policy_probs, value = self.model.predict(board_state, valid_moves_mask)
+        # Convert board state to input format
+        player_pieces = (board_state == 1).astype(np.float32)
+        opponent_pieces = (board_state == 2).astype(np.float32)
+        
+        # Stack into input tensor (3, board_size, board_size)
+        x = np.stack([player_pieces, opponent_pieces, valid_moves_mask], axis=0)
+        x = torch.from_numpy(x).unsqueeze(0).to(self.device)  # Add batch dim and move to device
+        
+        # Get predictions
+        self.model.eval()
+        with torch.no_grad():
+            policy_logits, value = self.model(x)
+            policy_probs = F.softmax(policy_logits, dim=1).squeeze(0).cpu().numpy()
+            value = value.item()
         
         # Convert policy to dictionary
         action_probs = {}

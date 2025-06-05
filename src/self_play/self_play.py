@@ -31,17 +31,22 @@ class SelfPlay:
                 - save_dir: Directory to save training data
         """
         self.model = model
+        self.device = next(model.parameters()).device
+        self.model.to(self.device)
+        self.model.eval()
+        
         self.args = args
         self.mcts = MCTS(
             model=model,
             c_puct=args.get('c_puct', 1.0),
             num_simulations=args.get('num_simulations', 800)
         )
-        self.device = next(model.parameters()).device
         
         # Create save directory if it doesn't exist
         self.save_dir = args.get('save_dir', 'self_play_data')
         os.makedirs(self.save_dir, exist_ok=True)
+        
+        print(f"SelfPlay initialized on device: {self.device}")
     
     def generate_games(self, num_games: int) -> List[Dict]:
         """

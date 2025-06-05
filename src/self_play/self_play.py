@@ -75,9 +75,6 @@ class SelfPlay:
                 'winners': []
             }
             
-            # Add initial state
-            self._add_state_to_game_data(game, game_data)
-            
             # Play the game
             while not game.is_game_over():
                 # Get action probabilities from MCTS
@@ -99,12 +96,8 @@ class SelfPlay:
                 # Update MCTS tree
                 self.mcts.update_with_move(action)
                 
-                # Add new state to game data (for the next iteration)
+                # Add the state that we made the move from (before the move)
                 self._add_state_to_game_data(game, game_data)
-                
-                # If the game ended after this move, we need to add the final state
-                if game.is_game_over():
-                    self._add_state_to_game_data(game, game_data)
             
             # Determine the winner
             winner = game.get_winner()

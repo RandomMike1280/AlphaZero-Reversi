@@ -482,11 +482,10 @@ class MCTS:
         # Convert to tensor and move to device
         states_tensor = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
         
-        # Get batch predictions
+        # Get batch predictions using the model's predict method
         with torch.no_grad():
-            policy_logits, values = self.model(states_tensor)
+            policy_logits, values = self.model.predict(states_tensor)
             policy_probs = F.softmax(policy_logits, dim=1).cpu().numpy()
-            # The model's forward already returns squeezed values, so no need to squeeze again
             values = values.cpu().numpy()
         
         # Process each node in the batch

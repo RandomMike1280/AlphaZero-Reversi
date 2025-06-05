@@ -155,8 +155,8 @@ class Trainer:
             # Zero gradients
             self.optimizer.zero_grad()
             
-            # Forward pass
-            policy_logits, value_preds = self.model(states)
+            # Forward pass - use predict for consistency with inference
+            policy_logits, value_preds = self.model.predict(states)
             
             # Calculate losses
             # Policy loss: cross-entropy between predicted and target policy
@@ -208,8 +208,8 @@ class Trainer:
                 action_probs = action_probs.to(self.device, non_blocking=True)
                 values = values.to(self.device, non_blocking=True)
                 
-                # Forward pass
-                policy_logits, value_preds = self.model(states)
+                # Forward pass - use predict for consistency with training
+                policy_logits, value_preds = self.model.predict(states)
                 
                 # Calculate losses
                 policy_loss = -torch.mean(torch.sum(action_probs * F.log_softmax(policy_logits, dim=1), dim=1))

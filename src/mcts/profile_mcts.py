@@ -146,7 +146,7 @@ class ProfilingWrapper:
         with torch.no_grad():
             for _ in range(num_batches):
                 batch = create_batch()
-                policy, value = self.model(batch)
+                policy, value = self.model.predict(batch)
                 _ = policy.cpu().numpy()
                 _ = value.cpu().numpy()
         

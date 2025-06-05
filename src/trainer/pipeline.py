@@ -217,7 +217,7 @@ class AlphaZeroPipeline:
             self.optimizer.zero_grad()
             
             # Forward pass
-            policy_logits, value_preds = self.model(states)
+            policy_logits, value_preds = self.model.predict(states)
             
             # Calculate losses
             policy_loss = self.criterion['policy'](

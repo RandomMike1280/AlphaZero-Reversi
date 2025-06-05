@@ -32,17 +32,22 @@ class AlphaZeroPipeline:
             config: Configuration object. If None, uses default config.
         """
         self.config = config if config is not None else get_default_config()
-        self.device = torch.device(self.config.training.device)
         
         # Set random seeds for reproducibility
         self._set_seeds()
         
         # Initialize components
+        self.device = self._get_device()
         self.model = self._init_model()
         self.optimizer = self._init_optimizer()
         self.scheduler = self._init_scheduler()
         self.criterion = self._init_criterion()
         self.logger = setup_logger(self.config)
+        
+        # Log device info
+        self.logger.logger.info(f"Using device: {self.device}")
+        if str(self.device) == 'cuda':
+            self.logger.logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
         
         # Training state
         self.current_iteration = 0
@@ -52,6 +57,18 @@ class AlphaZeroPipeline:
         os.makedirs(self.config.training.checkpoint_dir, exist_ok=True)
         os.makedirs(self.config.self_play.save_dir, exist_ok=True)
         os.makedirs(self.config.tournament.output_dir, exist_ok=True)
+        
+    def _get_device(self) -> torch.device:
+        """Get the available device (CUDA if available, else CPU)."""
+        try:
+            # Try to use CUDA if it's requested and available
+            if self.config.training.device == 'cuda' and torch.cuda.is_available():
+                return torch.device('cuda')
+            # Fall back to CPU
+            return torch.device('cpu')
+        except Exception as e:
+            print(f"Warning: Could not use CUDA: {e}. Falling back to CPU.")
+            return torch.device('cpu')
     
     def _set_seeds(self):
         """Set random seeds for reproducibility."""

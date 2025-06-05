@@ -53,7 +53,7 @@ class TrainingConfig:
     lr_gamma: float = 0.1
     checkpoint_dir: str = "checkpoints"
     save_interval: int = 1  # Save checkpoint every N epochs
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = field(default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu")
     num_workers: int = 4
     gradient_clip: float = 1.0
     policy_loss_weight: float = 1.0

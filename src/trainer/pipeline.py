@@ -66,10 +66,7 @@ class AlphaZeroPipeline:
         model = AlphaZeroNetwork(
             board_size=self.config.model.board_size,
             num_res_blocks=self.config.model.num_res_blocks,
-            num_filters=self.config.model.num_filters,
-            value_head_hidden_size=self.config.model.value_head_hidden_size,
-            policy_head_hidden_size=self.config.model.policy_head_hidden_size,
-            dropout=self.config.model.dropout
+            num_filters=self.config.model.num_filters
         )
         return model.to(self.device)
     

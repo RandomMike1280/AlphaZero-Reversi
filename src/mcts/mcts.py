@@ -76,10 +76,16 @@ class MCTSNode:
         Returns:
             The selected child node
         """
-        _, best_child = max(
-            (child.ucb_score(self.visit_count, c_puct), action, child)
-            for action, child in self.children.items()
-        )
+        # Get the child with the highest UCB score
+        best_score = -float('inf')
+        best_child = None
+        
+        for action, child in self.children.items():
+            score = child.ucb_score(self.visit_count, c_puct)
+            if score > best_score:
+                best_score = score
+                best_child = child
+                
         return best_child
     
     def expand(self, action_probs: Dict[Tuple[int, int], float], turn: int):

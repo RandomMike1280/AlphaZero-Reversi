@@ -1,0 +1,56 @@
+{
+  "project_name": "alphazero_reversi",
+  "seed": 42,
+  "model": {
+    "board_size": 8,
+    "num_res_blocks": 5,
+    "num_filters": 128,
+    "value_head_hidden_size": 256,
+    "policy_head_hidden_size": 256,
+    "dropout": 0.2
+  },
+  "mcts": {
+    "num_simulations": 800,
+    "c_puct": 1.0,
+    "temperature": 1.0,
+    "dirichlet_alpha": 0.03,
+    "dirichlet_epsilon": 0.25,
+    "num_parallel": 4
+  },
+  "self_play": {
+    "num_games": 100,
+    "num_parallel_games": 4,
+    "save_dir": "self_play_data",
+    "save_every": 10,
+    "temperature_threshold": 10
+  },
+  "training": {
+    "num_epochs": 1000,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "momentum": 0.9,
+    "gradient_clip": 5.0,
+    "checkpoint_dir": "checkpoints",
+    "save_interval": 10,
+    "policy_loss_weight": 1.0,
+    "value_loss_weight": 1.0,
+    "num_workers": 4,
+    "device": "cuda",
+    "lr_milestones": [500, 750, 900],
+    "lr_gamma": 0.1
+  },
+  "tournament": {
+    "rounds": 10,
+    "num_simulations": 400,
+    "c_puct": 1.0,
+    "output_dir": "tournament_results",
+    "elo_file": "elo_ratings.json"
+  },
+  "logging": {
+    "log_dir": "logs",
+    "use_tensorboard": true,
+    "log_level": "INFO",
+    "verbose": true
+  }
+}

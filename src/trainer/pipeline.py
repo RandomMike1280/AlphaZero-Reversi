@@ -477,31 +477,26 @@ class AlphaZeroPipeline:
             self.logger.logger.info(f"New best model saved with ELO: {self.best_elo:.2f}")
     
     def load_checkpoint(self, checkpoint_path: str):
-        """Load model from checkpoint."""
+        """Load model from checkpoint, handling both JIT-scripted and regular models."""
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
         
+        # First try to load as a JIT-scripted model
+        if checkpoint_path.endswith('.pt') or checkpoint_path.endswith('.pth'):
+            try:
+                # Try loading as a JIT-scripted model
+                self.model = torch.jit.load(checkpoint_path, map_location=self.device)
+                self.logger.logger.info(f"Loaded JIT-scripted model from {checkpoint_path}")
+                return
+            except (RuntimeError, TypeError):
+                # If that fails, fall through to regular loading
+                pass
+        
+        # Regular checkpoint loading
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         
-        # Handle JIT-scripted model checkpoints
-        model_state_dict = checkpoint['model_state_dict']
-        
-        # Check if this is a JIT-scripted model checkpoint
-        is_jit = any(k.startswith('_script_module.') for k in model_state_dict.keys())
-        
-        if is_jit:
-            # Create a new state dict without the '_script_module.' prefix
-            new_state_dict = {}
-            for k, v in model_state_dict.items():
-                if k.startswith('_script_module.'):
-                    new_k = k.replace('_script_module.', '')
-                    new_state_dict[new_k] = v
-                else:
-                    new_state_dict[k] = v
-            model_state_dict = new_state_dict
-        
         # Load model state
-        self.model.load_state_dict(model_state_dict)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
@@ -510,8 +505,11 @@ class AlphaZeroPipeline:
         self.best_elo = checkpoint.get('best_elo', -float('inf'))
         
         self.logger.logger.info(f"Loaded checkpoint from {checkpoint_path} (iteration {self.current_iteration})")
-        if is_jit:
-            self.logger.logger.info("Successfully converted JIT-scripted checkpoint to regular model")
+        
+        # If the model supports JIT compilation, compile it
+        if hasattr(self.model, 'compile') and callable(getattr(self.model, 'compile')):
+            self.model.compile()
+            self.logger.logger.info("Model compiled with JIT")
 
 def train_from_config(config_path: Optional[str] = None):
     """

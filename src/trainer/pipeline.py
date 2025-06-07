@@ -483,8 +483,25 @@ class AlphaZeroPipeline:
         
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         
+        # Handle JIT-scripted model checkpoints
+        model_state_dict = checkpoint['model_state_dict']
+        
+        # Check if this is a JIT-scripted model checkpoint
+        is_jit = any(k.startswith('_script_module.') for k in model_state_dict.keys())
+        
+        if is_jit:
+            # Create a new state dict without the '_script_module.' prefix
+            new_state_dict = {}
+            for k, v in model_state_dict.items():
+                if k.startswith('_script_module.'):
+                    new_k = k.replace('_script_module.', '')
+                    new_state_dict[new_k] = v
+                else:
+                    new_state_dict[k] = v
+            model_state_dict = new_state_dict
+        
         # Load model state
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.load_state_dict(model_state_dict)
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
@@ -493,6 +510,8 @@ class AlphaZeroPipeline:
         self.best_elo = checkpoint.get('best_elo', -float('inf'))
         
         self.logger.logger.info(f"Loaded checkpoint from {checkpoint_path} (iteration {self.current_iteration})")
+        if is_jit:
+            self.logger.logger.info("Successfully converted JIT-scripted checkpoint to regular model")
 
 def train_from_config(config_path: Optional[str] = None):
     """

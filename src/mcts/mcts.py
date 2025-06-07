@@ -453,7 +453,11 @@ class MCTS:
         num_filters = self.model.num_filters
         # Get number of residual blocks from the model's res_blocks ModuleList
         num_res_blocks = len(self.model.res_blocks)
-            
+        
+        # Get the state dict and handle JIT compiled models
+        state_dict = self.model.state_dict()
+        is_jit = any(k.startswith('_script_module.') for k in state_dict.keys())
+        
         # Create model replicas for each GPU
         for i in range(self.num_gpus):
             device = torch.device(f'cuda:{i}')
@@ -463,9 +467,21 @@ class MCTS:
                 num_res_blocks=num_res_blocks,
                 num_filters=num_filters
             )
-            # Load the state dict to copy weights
-            model_copy.load_state_dict(self.model.state_dict())
-            # Move to the target device
+            
+            if is_jit:
+                # If the model is JIT compiled, we need to handle the state dict specially
+                # Create a new state dict without the _script_module prefix
+                new_state_dict = {}
+                for k, v in state_dict.items():
+                    if k.startswith('_script_module.'):
+                        new_k = k.replace('_script_module.', '')
+                        new_state_dict[new_k] = v
+                model_copy.load_state_dict(new_state_dict)
+            else:
+                # For non-JIT models, load the state dict normally
+                model_copy.load_state_dict(state_dict)
+            
+            # Move to the target device and set to eval mode
             self.models[i] = model_copy.to(device)
             self.models[i].eval()
     

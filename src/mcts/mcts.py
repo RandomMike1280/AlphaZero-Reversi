@@ -451,7 +451,14 @@ class MCTS:
         # Create model replicas for each GPU
         for i in range(self.num_gpus):
             device = torch.device(f'cuda:{i}')
-            self.models[i] = self.model.to(device)
+            # Create a deep copy of the model for each GPU
+            model_copy = type(self.model)(
+                board_size=self.model.board_size,
+                num_res_blocks=self.model.num_res_blocks,
+                num_filters=self.model.num_filters
+            )
+            model_copy.load_state_dict(self.model.state_dict())
+            self.models[i] = model_copy.to(device)
             self.models[i].eval()
     
     def _predict_batch(self, states_tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -483,20 +490,28 @@ class MCTS:
         policy_chunks = []
         value_chunks = []
         
+        # Process each chunk on its designated GPU
         for i, chunk in enumerate(chunks):
-            if i >= self.num_gpus:
-                # If we have more chunks than GPUs, wrap around
-                i = i % self.num_gpus
+            gpu_idx = i % self.num_gpus
+            device = torch.device(f'cuda:{gpu_idx}')
             
-            device = torch.device(f'cuda:{i}')
+            # Move chunk to the target device
             chunk = chunk.to(device)
             
+            # Get model for this GPU
+            model = self.models[gpu_idx]
+            
+            # Make sure the model is on the correct device
+            if next(model.parameters()).device != device:
+                model = model.to(device)
+            
             with torch.no_grad():
-                policy, value = self.models[i].predict(chunk)
+                policy, value = model.predict(chunk)
+                # Move results back to CPU before storing
                 policy_chunks.append(policy.cpu())
                 value_chunks.append(value.cpu())
         
-        # Concatenate results
+        # Concatenate results on CPU
         policy_logits = torch.cat(policy_chunks, dim=0)
         values = torch.cat(value_chunks, dim=0)
         

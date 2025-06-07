@@ -542,7 +542,7 @@ class MCTS:
         return policy_logits, values
     
     def _process_batch(self, leaf_batch: List[Tuple[MCTSNode, Any, List[MCTSNode]]]):
-        """Process a batch of leaf nodes in parallel."""
+        """Process a batch of leaf nodes in parallel using optimized bitboard operations."""
         if not leaf_batch:
             return
         
@@ -550,6 +550,13 @@ class MCTS:
         states = []
         paths = []
         nodes = []
+        
+        def bitboard_to_numpy(bb, size):
+            """Convert a bitboard to a numpy array directly."""
+            # Convert to binary string, pad with zeros, and convert to array
+            s = np.array([int(c) for c in bin(bb)[2:].zfill(size*size)])
+            # Reshape to 2D and convert to float32
+            return s.astype(np.float32).reshape(size, size)
         
         for node, game_copy, path in leaf_batch:
             # Get valid moves if not already cached
@@ -571,15 +578,24 @@ class MCTS:
                 self._backpropagate_path(path, node.terminal_value)
                 continue
             
-            # Prepare input tensor
-            board_state = game_copy.get_board_state()
+            # Get bitboards directly from the game board
+            black_bb = game_copy.board.black
+            white_bb = game_copy.board.white
+            
+            # Determine which pieces belong to the current player and opponent
+            if node.turn == 1:  # Black's turn
+                player_pieces = bitboard_to_numpy(black_bb, game_copy.size)
+                opponent_pieces = bitboard_to_numpy(white_bb, game_copy.size)
+            else:  # White's turn
+                player_pieces = bitboard_to_numpy(white_bb, game_copy.size)
+                opponent_pieces = bitboard_to_numpy(black_bb, game_copy.size)
+            
+            # Create valid moves mask
             valid_moves_mask = np.zeros((game_copy.size, game_copy.size), dtype=np.float32)
             for row, col in node.valid_moves:
                 valid_moves_mask[row, col] = 1.0
             
-            player_pieces = (board_state == 1).astype(np.float32)
-            opponent_pieces = (board_state == 2).astype(np.float32)
-            
+            # Stack the channels
             x = np.stack([player_pieces, opponent_pieces, valid_moves_mask], axis=0)
             states.append(x)
             paths.append(path)

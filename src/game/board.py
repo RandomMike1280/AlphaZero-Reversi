@@ -69,7 +69,7 @@ class Board:
         
     def get_valid_moves(self, player: int = None) -> List[Tuple[int, int]]:
         """
-        Get all valid moves for the given player.
+        Get all valid moves for the given player using bitboard operations.
         
         Args:
             player: The player to get valid moves for. If None, uses current player.
@@ -80,16 +80,61 @@ class Board:
         if player is None:
             player = self.current_player
             
+        # Get the bitboard for the current player and opponent
+        player_board = self.black if player == self.BLACK else self.white
+        opponent_board = self.white if player == self.BLACK else self.black
+        empty_squares = ~(self.black | self.white) & 0xFFFFFFFFFFFFFFFF  # Mask to 64 bits
+        
+        # Directions: E, W, S, N, SE, NW, SW, NE
+        directions = [
+            (1, 0),    # East
+            (-1, 0),   # West
+            (0, 1),    # South
+            (0, -1),   # North
+            (1, 1),    # South-East
+            (-1, -1),  # North-West
+            (-1, 1),   # South-West
+            (1, -1)    # North-East
+        ]
+        
+        valid_moves_bb = 0
+        
+        for dx, dy in directions:
+            # Calculate the shift amount
+            shift = dx + dy * 8
+            
+            # Get the player's pieces that have opponent's pieces in the given direction
+            candidates = 0
+            if shift > 0:
+                candidates = (player_board << shift) & opponent_board
+            else:
+                candidates = (player_board >> -shift) & opponent_board
+            
+            # Propagate in the direction until we hit an empty square or the edge of the board
+            for _ in range(5):  # Maximum of 5 steps needed on an 8x8 board
+                if shift > 0:
+                    candidates |= ((candidates << shift) & opponent_board)
+                else:
+                    candidates |= ((candidates >> -shift) & opponent_board)
+            
+            # The valid moves are the empty squares adjacent to the end of the line of opponent's pieces
+            if shift > 0:
+                valid_moves_bb |= (candidates << shift) & empty_squares
+            else:
+                valid_moves_bb |= (candidates >> -shift) & empty_squares
+        
+        # Convert the bitboard to a list of (row, col) tuples
         valid_moves = []
-        for i in range(self.SIZE):
-            for j in range(self.SIZE):
-                if self.is_valid_move(i, j, player):
-                    valid_moves.append((i, j))
+        for i in range(64):
+            if valid_moves_bb & (1 << i):
+                row, col = divmod(i, 8)
+                valid_moves.append((row, col))
+                
         return valid_moves
     
     def make_move(self, row: int, col: int, player: int = None) -> bool:
         """
-        Make a move on the board.
+        Make a move on the board using bitboard operations.
         
         Args:
             row: Row of the move (0-based), or -1 for pass
@@ -99,70 +144,107 @@ class Board:
         Returns:
             bool: True if the move was valid and made, False otherwise
         """
-        if self.game_over:
-            return False
-                
+        if player is None:
+            player = self.current_player
+            
         # Handle pass move
         if row == -1 and col == -1:
             # Check if passing is allowed (player has no valid moves)
-            if self.has_any_valid_move(player or self.current_player):
-                return False  # Player must make a move if possible
-                    
+            if self.get_valid_moves(player):  # Using our optimized get_valid_moves
+                return False
+                
             # Record the pass
             self.passed_moves_in_a_row += 1
-            self.move_history.append((row, col, player or self.current_player))
+            self.move_history.append((row, col, player))
+            
+            # Switch player
+            self.current_player = 3 - player  # Toggle between BLACK (1) and WHITE (2)
             
             # Check if game is over (two passes in a row)
             if self.passed_moves_in_a_row >= 2:
                 self.game_over = True
                 self._determine_winner()
-            else:
-                # Switch player
-                self.current_player = self.WHITE if (player or self.current_player) == self.BLACK else self.BLACK
-            
             return True
             
         # Handle normal move
-        if player is None:
-            player = self.current_player
+        move_bit = 1 << (row * 8 + col)
+        
+        # Check if the move is valid using the fast bitboard method
+        valid_moves = self.get_valid_moves(player)
+        valid_moves_bb = 0
+        for r, c in valid_moves:
+            valid_moves_bb |= 1 << (r * 8 + c)
             
-        # Check if the move is valid
-        if not self.is_valid_move(row, col, player):
+        if not (move_bit & valid_moves_bb):
             return False
             
         # Reset passed moves counter
         self.passed_moves_in_a_row = 0
         
-        # Make the move
-        square = row * 8 + col
-        move_bit = 1 << square
-        
-        # Get the pieces that would be flipped
-        flipped = self._get_flipped_pieces((row, col), player)
-        flip_bits = 0
-        for r, c in flipped:
-            flip_bits |= 1 << (r * 8 + c)
-            
-        # Update the bitboards
+        # Get the player's and opponent's bitboards
         if player == self.BLACK:
-            self.black ^= move_bit | flip_bits
-            self.white ^= flip_bits
+            player_board = self.black
+            opponent_board = self.white
         else:
-            self.white ^= move_bit | flip_bits
-            self.black ^= flip_bits
+            player_board = self.white
+            opponent_board = self.black
+            
+        # Calculate all pieces to flip
+        flip_mask = 0
         
-        # Switch player
-        self.current_player = self.WHITE if player == self.BLACK else self.BLACK
+        # Directions: E, W, S, N, SE, NW, SW, NE
+        directions = [1, -1, 8, -8, 7, -7, 9, -9]
         
-        # Update board state
+        # Edge masks to prevent wrapping around the board edges
+        edge_masks = {
+            1: 0xFEFEFEFEFEFEFEFE,  # East (no wrap from right to left)
+            -1: 0x7F7F7F7F7F7F7F7F,  # West (no wrap from left to right)
+            7: 0xFEFEFEFEFEFEFEFE,   # SW (no wrap from right to left)
+            -7: 0x7F7F7F7F7F7F7F7F,  # NE (no wrap from left to right)
+            9: 0x7F7F7F7F7F7F7F7F,   # SE (no wrap from right to left)
+            -9: 0xFEFEFEFEFEFEFEFE   # NW (no wrap from left to right)
+        }
+
+        for d in directions:
+            line_mask = 0
+            curr = move_bit
+            edge_mask = edge_masks.get(abs(d), 0xFFFFFFFFFFFFFFFF)
+            
+            # Shift and check for opponent pieces
+            for _ in range(self.size - 1):
+                curr = (curr << d) if d > 0 else (curr >> -d)
+                if not (curr & opponent_board & edge_mask):
+                    break  # Stop if we hit an empty square or our own piece
+                line_mask |= curr
+                
+            # If the line ends with one of our pieces, add it to the flip_mask
+            if (curr & player_board & edge_mask):
+                flip_mask |= line_mask
+
+        # Update bitboards with XOR
+        if player == self.BLACK:
+            self.black ^= move_bit | flip_mask
+            self.white ^= flip_mask
+        else:
+            self.white ^= move_bit | flip_mask
+            self.black ^= flip_mask
+            
+        # Record the move
+        self.move_history.append((row, col, player))
+            
+        # Switch player and check for game over conditions
+        self.current_player = 3 - player
+        
+        # Update the numpy board representation
         self._update_board_state()
         
-        # Check if the next player has any valid moves
-        if not self._check_game_over() and not self.has_any_valid_move(self.current_player):
+        # If the new player has no moves, pass the turn
+        if not self.get_valid_moves(self.current_player):
+            self.current_player = 3 - self.current_player
             self.passed_moves_in_a_row += 1
-            self.current_player = self.WHITE if self.current_player == self.BLACK else self.BLACK
             
-            if self.passed_moves_in_a_row >= 2:
+            # If this player also has no moves, game is over
+            if not self.get_valid_moves(self.current_player):
                 self.game_over = True
                 self._determine_winner()
         
@@ -201,45 +283,67 @@ class Board:
                 c += dc
                 
         return False
-    
+        
     def has_any_valid_move(self, player: int = None) -> bool:
         """Check if the player has any valid moves."""
         if player is None:
             player = self.current_player
             
-        for i in range(self.SIZE):
-            for j in range(self.SIZE):
-                if self.is_valid_move(i, j, player):
-                    return True
-        return False
+        # Use the optimized get_valid_moves method
+        return len(self.get_valid_moves(player)) > 0
     
-    def _get_flipped_pieces(self, move: Tuple[int, int], player: int) -> List[Tuple[int, int]]:
-        """Get the list of pieces that would be flipped by a move."""
+    def _get_flipped_pieces(self, move: Tuple[int, int], player: int):
+        """
+        Get the list of pieces that would be flipped by a move.
+        This is kept for backward compatibility but is not used by the optimized make_move.
+        """
         row, col = move
-        if self._board[row, col] != self.EMPTY:
-            return []
-            
-        opponent = self.WHITE if player == self.BLACK else self.BLACK
-        flipped = []
-        directions = [(-1, -1), (-1, 0), (-1, 1),
-                     (0, -1),           (0, 1),
-                     (1, -1),  (1, 0),  (1, 1)]
+        move_bit = 1 << (row * 8 + col)
         
-        for dr, dc in directions:
-            r, c = row + dr, col + dc
-            to_flip = []
+        if player == self.BLACK:
+            player_board = self.black
+            opponent_board = self.white
+        else:
+            player_board = self.white
+            opponent_board = self.black
             
-            while 0 <= r < self.SIZE and 0 <= c < self.SIZE:
-                if self._board[r, c] == opponent:
-                    to_flip.append((r, c))
-                elif self._board[r, c] == player:
-                    flipped.extend(to_flip)
-                    break
-                else:  # Empty
-                    break
-                    
-                r += dr
-                c += dc
+        flip_mask = 0
+        
+        # Directions: E, W, S, N, SE, NW, SW, NE
+        directions = [1, -1, 8, -8, 7, -7, 9, -9]
+        
+        # Edge masks to prevent wrapping around the board edges
+        edge_masks = {
+            1: 0xFEFEFEFEFEFEFEFE,  # East (no wrap from right to left)
+            -1: 0x7F7F7F7F7F7F7F7F,  # West (no wrap from left to right)
+            7: 0xFEFEFEFEFEFEFEFE,   # SW (no wrap from right to left)
+            -7: 0x7F7F7F7F7F7F7F7F,  # NE (no wrap from left to right)
+            9: 0x7F7F7F7F7F7F7F7F,   # SE (no wrap from right to left)
+            -9: 0xFEFEFEFEFEFEFEFE   # NW (no wrap from left to right)
+        }
+
+        for d in directions:
+            line_mask = 0
+            curr = move_bit
+            edge_mask = edge_masks.get(abs(d), 0xFFFFFFFFFFFFFFFF)
+            
+            # Shift and check for opponent pieces
+            for _ in range(self.size - 1):
+                curr = (curr << d) if d > 0 else (curr >> -d)
+                if not (curr & opponent_board & edge_mask):
+                    break  # Stop if we hit an empty square or our own piece
+                line_mask |= curr
+                
+            # If the line ends with one of our pieces, add it to the flip_mask
+            if (curr & player_board & edge_mask):
+                flip_mask |= line_mask
+        
+        # Convert flip_mask to list of (row, col) tuples
+        flipped = []
+        for i in range(64):
+            if flip_mask & (1 << i):
+                row, col = divmod(i, 8)
+                flipped.append((row, col))
                 
         return flipped
     

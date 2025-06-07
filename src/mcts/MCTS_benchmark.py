@@ -44,7 +44,7 @@ class DummyModel(nn.Module):
         self.value_fc1 = nn.Linear(board_size * board_size, 64)
         self.value_fc2 = nn.Linear(64, 1)
     
-    def forward(self, x):
+    def predict(self, x):
         # Input shape: (batch, 3, board_size, board_size)
         batch_size = x.size(0)
         
@@ -219,7 +219,7 @@ def main():
     parser.add_argument('--board-size', type=int, default=8, help='Board size')
     parser.add_argument('--simulations', type=int, default=800, help='Number of MCTS simulations')
     parser.add_argument('--runs', type=int, default=5, help='Number of runs per configuration')
-    parser.add_argument('--batch-sizes', type=int, nargs='+', default=[1, 8, 16, 32],
+    parser.add_argument('--batch-sizes', type=int, nargs='+', default=[1, 8, 16, 32, 64],
                        help='Batch sizes to test')
     parser.add_argument('--no-cuda', action='store_true', help='Disable CUDA')
     

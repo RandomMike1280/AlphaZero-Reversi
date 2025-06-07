@@ -7,6 +7,7 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from typing import Dict, List, Tuple, Optional, Any, Union
@@ -106,7 +107,7 @@ class AlphaZeroPipeline:
     def _init_criterion(self) -> Dict[str, callable]:
         """Initialize loss functions."""
         return {
-            'policy': nn.KLDivLoss(reduction='batchmean'),  # Use KL divergence for policy
+            'policy': nn.CrossEntropyLoss(),
             'value': nn.MSELoss()
         }
     
@@ -326,16 +327,12 @@ class AlphaZeroPipeline:
             # Forward pass
             policy_logits, value_preds = self.model.predict(states)
             
-            # Calculate policy loss using KL divergence
-            # First, apply log_softmax to policy_logits
-            policy_log_probs = F.log_softmax(policy_logits.view(-1, policy_logits.size(-1)), dim=1)
-            # The target is already a probability distribution from MCTS
+            # Calculate losses
             policy_loss = self.criterion['policy'](
-                policy_log_probs,
-                policy_targets.view(-1, policy_targets.size(1))
+                policy_logits.view(-1, policy_logits.size(-1)),
+                policy_targets.argmax(dim=1)
             )
             
-            # Calculate value loss
             value_loss = self.criterion['value'](
                 value_preds.squeeze(),
                 value_targets

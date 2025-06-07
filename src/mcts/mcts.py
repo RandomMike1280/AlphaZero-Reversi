@@ -3,10 +3,12 @@ Monte Carlo Tree Search (MCTS) implementation for AlphaZero with transposition t
 """
 import math
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple, Any, Set, Union
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from collections import defaultdict
+import torch.distributed as dist
 
 # Define a transposition table entry
 class TranspositionTableEntry:
@@ -213,6 +215,15 @@ class MCTS:
         self.root = None
         self.lock = None  # Will be initialized if using threads
         self.use_transposition = use_transposition
+        
+        # Initialize multi-GPU settings
+        self.use_cuda = torch.cuda.is_available()
+        self.num_gpus = torch.cuda.device_count() if self.use_cuda else 0
+        self.models = {}
+        
+        # If using multiple GPUs, create model replicas
+        if self.num_gpus > 1:
+            self._init_multi_gpu()
         
         # Transposition table: maps zobrist_hash -> TranspositionTableEntry
         self.transposition_table = {}
@@ -432,6 +443,65 @@ class MCTS:
         
         return node, game
     
+    def _init_multi_gpu(self):
+        """Initialize models on multiple GPUs if available."""
+        if self.num_gpus <= 1:
+            return
+            
+        # Create model replicas for each GPU
+        for i in range(self.num_gpus):
+            device = torch.device(f'cuda:{i}')
+            self.models[i] = self.model.to(device)
+            self.models[i].eval()
+    
+    def _predict_batch(self, states_tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Make predictions on a batch of states using available GPUs.
+        
+        Args:
+            states_tensor: Input tensor of shape (batch_size, channels, height, width)
+            
+        Returns:
+            Tuple of (policy_logits, values)
+        """
+        if self.num_gpus <= 1 or not self.use_cuda:
+            # Single GPU or CPU case
+            with torch.no_grad():
+                return self.model.predict(states_tensor.to(self.device))
+        
+        # Multi-GPU case
+        batch_size = states_tensor.size(0)
+        if batch_size < self.num_gpus:
+            # If batch size is smaller than number of GPUs, just use one GPU
+            with torch.no_grad():
+                return self.model.predict(states_tensor.to(self.device))
+        
+        # Split batch across GPUs
+        chunk_size = (batch_size + self.num_gpus - 1) // self.num_gpus
+        chunks = [states_tensor[i:i + chunk_size] for i in range(0, batch_size, chunk_size)]
+        
+        policy_chunks = []
+        value_chunks = []
+        
+        for i, chunk in enumerate(chunks):
+            if i >= self.num_gpus:
+                # If we have more chunks than GPUs, wrap around
+                i = i % self.num_gpus
+            
+            device = torch.device(f'cuda:{i}')
+            chunk = chunk.to(device)
+            
+            with torch.no_grad():
+                policy, value = self.models[i].predict(chunk)
+                policy_chunks.append(policy.cpu())
+                value_chunks.append(value.cpu())
+        
+        # Concatenate results
+        policy_logits = torch.cat(policy_chunks, dim=0)
+        values = torch.cat(value_chunks, dim=0)
+        
+        return policy_logits, values
+    
     def _process_batch(self, leaf_batch: List[Tuple[MCTSNode, Any, List[MCTSNode]]]):
         """Process a batch of leaf nodes in parallel."""
         if not leaf_batch:
@@ -479,14 +549,13 @@ class MCTS:
         if not states:  # All nodes were terminal
             return
         
-        # Convert to tensor and move to device
-        states_tensor = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
+        # Convert to tensor
+        states_tensor = torch.tensor(np.array(states), dtype=torch.float32)
         
         # Get batch predictions using the model's predict method
-        with torch.no_grad():
-            policy_logits, values = self.model.predict(states_tensor)
-            policy_probs = F.softmax(policy_logits, dim=1).cpu().numpy()
-            values = values.cpu().numpy()
+        policy_logits, values = self._predict_batch(states_tensor)
+        policy_probs = F.softmax(policy_logits, dim=1).numpy()
+        values = values.numpy()
         
         # Process each node in the batch
         for i, (node, path) in enumerate(zip(nodes, paths)):

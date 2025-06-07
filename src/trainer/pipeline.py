@@ -367,7 +367,16 @@ class AlphaZeroPipeline:
     
     def _evaluate_model(self) -> Dict[str, float]:
         """Evaluate the model using tournaments."""
+        # Ensure model is in eval mode and compiled with JIT if available
         self.model.eval()
+        
+        # Try to compile the model if not already compiled
+        if hasattr(self.model, 'compile') and callable(getattr(self.model, 'compile')):
+            try:
+                self.model.compile()
+                self.logger.logger.info("Model compiled with JIT for evaluation")
+            except Exception as e:
+                self.logger.logger.warning(f"JIT compilation failed, falling back to eager mode: {e}")
         
         # Create arena and add current model
         arena = Arena()

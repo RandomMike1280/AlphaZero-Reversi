@@ -62,17 +62,10 @@ class ReversiGame:
                 'board_after': self.board.copy()
             })
             
-            # Update game state
+            # Update game state from the board
             self.game_over = self.board.game_over
             self.winner = self.board.winner
-            
-            # Switch player if game isn't over
-            if not self.game_over:
-                self.current_player = self.board.current_player
-                
-                # If next player has no valid moves, switch back
-                if not self.get_valid_moves() or self.get_valid_moves() == [(-1, -1)]:
-                    self.current_player = Board.WHITE if self.current_player == Board.BLACK else Board.BLACK
+            self.current_player = self.board.current_player
         
         return move_made
     

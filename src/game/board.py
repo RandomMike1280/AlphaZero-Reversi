@@ -178,9 +178,6 @@ class Board:
         if not (move_bit & valid_moves_bb):
             return False
             
-        # Reset passed moves counter
-        self.passed_moves_in_a_row = 0
-        
         # Get the player's and opponent's bitboards
         if player == self.BLACK:
             player_board = self.black
@@ -237,6 +234,9 @@ class Board:
         
         # Update the numpy board representation
         self._update_board_state()
+        
+        # Reset passed moves counter since a valid move was made
+        self.passed_moves_in_a_row = 0
         
         # If the new player has no moves, pass the turn
         if not self.get_valid_moves(self.current_player):

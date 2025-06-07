@@ -163,6 +163,9 @@ class Trainer:
             policy_loss = -torch.mean(torch.sum(action_probs * F.log_softmax(policy_logits, dim=1), dim=1))
             
             # Value loss: MSE between predicted and actual values
+            # Ensure both tensors are 1D with consistent shapes
+            value_preds = value_preds.view(-1)
+            values = values.view(-1)
             value_loss = self.mse_loss(value_preds, values)
             
             # Total loss (weighted sum)
@@ -213,6 +216,9 @@ class Trainer:
                 
                 # Calculate losses
                 policy_loss = -torch.mean(torch.sum(action_probs * F.log_softmax(policy_logits, dim=1), dim=1))
+                # Ensure both tensors are 1D with consistent shapes
+                value_preds = value_preds.view(-1)
+                values = values.view(-1)
                 value_loss = self.mse_loss(value_preds, values)
                 loss = policy_loss + value_loss
                 

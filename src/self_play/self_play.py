@@ -93,12 +93,9 @@ class SelfPlay:
                 # Add the action probabilities for the current state
                 game_data['action_probs'].append(action_probs)
                 
-                # Make the move
+                # Make the move (including pass moves with (-1, -1))
                 row, col = action
-                if (row, col) == (-1, -1):  # Pass
-                    game.pass_turn()
-                else:
-                    game.make_move(row, col)
+                game.make_move(row, col)
                 
                 # Update MCTS tree
                 self.mcts.update_with_move(action)

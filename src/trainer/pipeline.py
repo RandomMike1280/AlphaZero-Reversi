@@ -194,25 +194,68 @@ class AlphaZeroPipeline:
         
         # Convert to numpy arrays
         try:
+            # Check for empty data
+            if not states or not policy_targets or not value_targets:
+                raise ValueError("Empty data in one or more of: states, policy_targets, value_targets")
+                
+            # Check all policy targets have the same length
+            policy_lengths = [len(p) for p in policy_targets]
+            if len(set(policy_lengths)) > 1:
+                print(f"Warning: Inconsistent policy target lengths: {set(policy_lengths)}")
+                # Find the most common length
+                from collections import Counter
+                most_common_length = Counter(policy_lengths).most_common(1)[0][0]
+                print(f"Using most common length: {most_common_length}")
+                # Filter out samples with different lengths
+                valid_indices = [i for i, p in enumerate(policy_targets) if len(p) == most_common_length]
+                states = [states[i] for i in valid_indices]
+                policy_targets = [policy_targets[i] for i in valid_indices]
+                value_targets = [value_targets[i] for i in valid_indices]
+                print(f"Filtered to {len(states)} samples with consistent lengths")
+            
+            # Convert to numpy arrays
             states_array = np.array(states, dtype=np.float32)
             policy_array = np.array(policy_targets, dtype=np.float32)
             value_array = np.array(value_targets, dtype=np.float32)
+            
+            # Validate shapes
+            if len(states_array.shape) != 4 or states_array.shape[1] != 3:
+                raise ValueError(f"Unexpected states shape: {states_array.shape}, expected (n, 3, board_size, board_size)")
+                
+            if len(policy_array.shape) != 2:
+                raise ValueError(f"Unexpected policy targets shape: {policy_array.shape}, expected (n, action_space)")
+                
+            if len(value_array.shape) != 1:
+                raise ValueError(f"Unexpected value targets shape: {value_array.shape}, expected (n,)")
             
             print(f"Generated training data: {len(states_array)} samples")
             print(f"States shape: {states_array.shape}")
             print(f"Policy targets shape: {policy_array.shape}")
             print(f"Value targets shape: {value_array.shape}")
+            print(f"Policy targets sum check (should be close to 1): {policy_array[0].sum()}")
             
             return {
                 'states': states_array,
                 'policy_targets': policy_array,
                 'value_targets': value_array
             }
+            
         except Exception as e:
             print(f"Error converting to numpy arrays: {e}")
             print(f"States length: {len(states)}")
+            if states:
+                print(f"First state shape: {np.array(states[0]).shape if hasattr(states[0], '__len__') else 'scalar'}")
             print(f"Policy targets length: {len(policy_targets)}")
+            if policy_targets:
+                print(f"First policy target shape: {np.array(policy_targets[0]).shape if hasattr(policy_targets[0], '__len__') else 'scalar'}")
             print(f"Value targets length: {len(value_targets)}")
+            if value_targets:
+                print(f"First value target: {value_targets[0]}")
+            print("\nSample of policy targets (first 5):")
+            for i, pt in enumerate(policy_targets[:5]):
+                print(f"{i}: Length={len(pt) if hasattr(pt, '__len__') else 'scalar'}, Type={type(pt)}")
+                if hasattr(pt, '__len__'):
+                    print(f"   Sum: {sum(pt) if hasattr(pt, 'sum') else 'N/A'}")
             raise
     
     def _train_epoch(self, train_data: Dict[str, np.ndarray]) -> Dict[str, float]:

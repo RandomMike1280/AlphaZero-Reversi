@@ -264,21 +264,21 @@ class Arena:
                     print(game)
         
         # Determine winner
-        black_count, white_count = game.get_piece_count()
+        black_score, white_score = game.get_score()
         
         if verbose:
-            print(f"Game over. Black: {black_count}, White: {white_count}")
-            if black_count > white_count:
+            print(f"Game over. Black: {black_score}, White: {white_score}")
+            if black_score > white_score:
                 print(f"{player1_id} (Black) wins!")
-            elif white_count > black_count:
+            elif white_score > black_score:
                 print(f"{player2_id} (White) wins!")
             else:
                 print("It's a draw!")
         
         # Return result from player1's perspective
-        if black_count > white_count:
+        if black_score > white_score:
             return 1.0  # player1 wins
-        elif white_count > black_count:
+        elif white_score > black_score:
             return 0.0  # player2 wins
         else:
             return 0.5  # draw

@@ -51,6 +51,6 @@
     "log_dir": "logs",
     "use_tensorboard": true,
     "log_level": "INFO",
-    "verbose": true
+    "verbose": false
   }
 }

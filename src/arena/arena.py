@@ -215,7 +215,7 @@ class Arena:
         self.players[player.player_id] = player
         self.elo.add_player(player.player_id)
     
-    def play_game(self, player1_id: str, player2_id: str, verbose: bool = False) -> int:
+    def play_game(self, player1_id: str, player2_id: str, verbose: bool = False, print_games: bool = False) -> int:
         """
         Play a single game between two players.
         
@@ -240,9 +240,10 @@ class Arena:
         # Initialize game
         game = ReversiGame()
         
-        if verbose:
+        if verbose or print_games:
             print(f"Starting game: {player1_id} (Black) vs {player2_id} (White)")
-            print(game)
+            if print_games:
+                print(game)
         
         # Game loop
         while not game.is_game_over():
@@ -254,19 +255,20 @@ class Arena:
             # Make move
             if move == (-1, -1):  # Pass
                 game.pass_turn()
-                if verbose:
+                if verbose or print_games:
                     print(f"{current_player.player_id} passes")
             else:
                 row, col = move
                 game.make_move(row, col)
-                if verbose:
+                if verbose or print_games:
                     print(f"{current_player.player_id} plays at ({row}, {col})")
-                    print(game)
+                    if print_games:
+                        print(game)
         
         # Determine winner
         black_score, white_score = game.get_score()
         
-        if verbose:
+        if verbose or print_games:
             print(f"Game over. Black: {black_score}, White: {white_score}")
             if black_score > white_score:
                 print(f"{player1_id} (Black) wins!")
@@ -283,7 +285,7 @@ class Arena:
         else:
             return 0.5  # draw
     
-    def run_tournament(self, rounds: int = 100, verbose: bool = False) -> Dict:
+    def run_tournament(self, rounds: int = 100, verbose: bool = False, print_games: bool = False) -> Dict:
         """
         Run a round-robin tournament between all players.
         
@@ -339,7 +341,7 @@ class Arena:
                         p1, p2 = p2, p1
                     
                     # Play the game
-                    result = self.play_game(p1, p2, verbose=verbose)
+                    result = self.play_game(p1, p2, verbose=verbose, print_games=print_games)
                     
                     # Update ELO ratings
                     self.elo.update_ratings(p1, p2, result)
@@ -370,7 +372,7 @@ class Arena:
             # Add round results
             results['rounds'].append(round_results)
             
-            if verbose:
+            if verbose or print_games:
                 print(f"\n--- After Round {round_num + 1} ---")
                 self.print_leaderboard()
         

@@ -578,25 +578,8 @@ class MCTS:
                 self._backpropagate_path(path, node.terminal_value)
                 continue
             
-            # Get bitboards directly from the game board
-            black_bb = game_copy.board.black
-            white_bb = game_copy.board.white
-            
-            # Determine which pieces belong to the current player and opponent
-            if node.turn == 1:  # Black's turn
-                player_pieces = bitboard_to_numpy(black_bb, game_copy.size)
-                opponent_pieces = bitboard_to_numpy(white_bb, game_copy.size)
-            else:  # White's turn
-                player_pieces = bitboard_to_numpy(white_bb, game_copy.size)
-                opponent_pieces = bitboard_to_numpy(black_bb, game_copy.size)
-            
-            # Create valid moves mask
-            valid_moves_mask = np.zeros((game_copy.size, game_copy.size), dtype=np.float32)
-            for row, col in node.valid_moves:
-                valid_moves_mask[row, col] = 1.0
-            
-            # Stack the channels
-            x = np.stack([player_pieces, opponent_pieces, valid_moves_mask], axis=0)
+            # Get the canonical state directly from the game object
+            x = game_copy.get_canonical_state()
             states.append(x)
             paths.append(path)
             nodes.append(node)
@@ -634,8 +617,9 @@ class MCTS:
             node.expand(action_probs, 3 - node.turn, node.valid_moves)
             
             # Backpropagate the value
-            value = values[i] if node.turn == 1 else -values[i]
-            self._backpropagate_path(path + [node], value)
+            # The network's output `values[i]` is already from the perspective of the node being expanded
+            # Note: Don't include the current node in the path as _backpropagate_path will handle it
+            self._backpropagate_path(path, values[i])
     
     def _backpropagate_path(self, path: List[MCTSNode], value: float):
         """Backpropagate value up the tree using the given path."""

@@ -372,10 +372,6 @@ class Board:
         else:
             self.winner = 0  # Draw
     
-    def get_board_state(self) -> np.ndarray:
-        """Return a copy of the current board state."""
-        return self._board.copy()
-    
     def __str__(self) -> str:
         """Return a string representation of the board."""
         symbols = {self.EMPTY: '.', self.BLACK: 'B', self.WHITE: 'W'}

@@ -134,6 +134,39 @@ class ReversiGame:
             List of move dictionaries containing player, move, and board states
         """
         return self.move_history.copy()
+        
+    def get_canonical_state(self) -> np.ndarray:
+        """
+        Returns the canonical board state for the neural network.
+        The state is always from the perspective of the current player.
+        
+        Returns:
+            A numpy array of shape (3, board_size, board_size)
+            - Channel 0: Current player's pieces (1s)
+            - Channel 1: Opponent's pieces (1s)
+            - Channel 2: Valid moves mask (1s)
+        """
+        # Get the board state and current player
+        board_state = self.get_board_state()
+        current_player = self.get_current_player()
+        
+        # Create canonical board representation using vectorized operations
+        current_player_mask = (board_state == current_player)
+        opponent_mask = (board_state != 0) & ~current_player_mask  # Non-zero and not current player
+        
+        # Convert to float32 for neural network input
+        current_player_pieces = current_player_mask.astype(np.float32)
+        opponent_pieces = opponent_mask.astype(np.float32)
+        
+        # Create valid moves mask using vectorized operations
+        valid_moves = self.get_valid_moves()
+        valid_moves_mask = np.zeros_like(board_state, dtype=np.float32)
+        if valid_moves:
+            valid_indices = np.array([(r, c) for r, c in valid_moves if (r, c) != (-1, -1)], dtype=np.int32)
+            if len(valid_indices) > 0:
+                valid_moves_mask[valid_indices[:, 0], valid_indices[:, 1]] = 1.0
+        
+        return np.stack([current_player_pieces, opponent_pieces, valid_moves_mask], axis=0)
     
     def copy(self) -> 'ReversiGame':
         """Create a deep copy of the game."""

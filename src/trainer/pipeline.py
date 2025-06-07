@@ -177,15 +177,15 @@ class AlphaZeroPipeline:
         expected_policy_length = board_size * board_size + 1  # +1 for pass move
         
         for game_idx, game in enumerate(games):
-            game_states = game['states']
-            game_action_probs = game['action_probs']
-            game_winners = game['winners']
+            game_states = game.get('states', [])
+            game_action_probs = game.get('action_probs', [])
+            game_values = game.get('values', [])
             
             # Debug info
-            print(f"Game {game_idx}: {len(game_states)} states, {len(game_action_probs)} action_probs, {len(game_winners)} winners")
+            print(f"Game {game_idx}: {len(game_states)} states, {len(game_action_probs)} action_probs, {len(game_values)} values")
             
             # Check for any mismatched lengths within the same game
-            min_length = min(len(game_states), len(game_action_probs), len(game_winners))
+            min_length = min(len(game_states), len(game_action_probs), len(game_values))
             if min_length == 0:
                 print(f"Warning: Game {game_idx} has no valid data")
                 continue
@@ -215,63 +215,40 @@ class AlphaZeroPipeline:
                         policy_targets.append(game_action_probs[i])
                 
                 states.append(game_states[i])
-                value_targets.append(game_winners[i])
+                value_targets.append(game_values[i])
         
         # Convert to numpy arrays
         try:
             # Check for empty data
             if not states or not policy_targets or not value_targets:
-                raise ValueError("Empty data in one or more of: states, policy_targets, value_targets")
+                raise ValueError("No valid training data was generated. Check the self-play output.")
             
-            # Verify all policy targets have the expected length
-            policy_lengths = [len(p) for p in policy_targets]
-            if len(set(policy_lengths)) > 1:
-                print(f"Warning: Inconsistent policy target lengths after conversion: {set(policy_lengths)}")
-                # Find the most common length
-                from collections import Counter
-                most_common_length = Counter(policy_lengths).most_common(1)[0][0]
-                print(f"Using most common length: {most_common_length}")
-                # Filter out samples with different lengths
-                valid_indices = [i for i, p in enumerate(policy_targets) if len(p) == most_common_length]
-                states = [states[i] for i in valid_indices]
-                policy_targets = [policy_targets[i] for i in valid_indices]
-                value_targets = [value_targets[i] for i in valid_indices]
-                print(f"Filtered to {len(states)} samples with consistent lengths")
+            states = np.array(states, dtype=np.float32)
+            policy_targets = np.array(policy_targets, dtype=np.float32)
+            value_targets = np.array(value_targets, dtype=np.float32).reshape(-1, 1)
             
-            # Convert to numpy arrays
-            states_array = np.array(states, dtype=np.float32)
-            policy_array = np.array(policy_targets, dtype=np.float32)
-            value_array = np.array(value_targets, dtype=np.float32)
+            print(f"Generated training data - States: {states.shape}, Policy targets: {policy_targets.shape}, Value targets: {value_targets.shape}")
             
-            # Validate shapes
-            if len(states_array.shape) != 4 or states_array.shape[1] != 3:
-                raise ValueError(f"Unexpected states shape: {states_array.shape}, expected (n, 3, board_size, board_size)")
+            # Verify shapes
+            if len(states) == 0 or len(policy_targets) == 0 or len(value_targets) == 0:
+                raise ValueError(f"Empty data in one or more arrays. Shapes - states: {states.shape}, policy: {policy_targets.shape}, values: {value_targets.shape}")
                 
-            if len(policy_array.shape) != 2:
-                raise ValueError(f"Unexpected policy targets shape: {policy_array.shape}, expected (n, action_space)")
-                
-            if len(value_array.shape) != 1:
-                raise ValueError(f"Unexpected value targets shape: {value_array.shape}, expected (n,)")
+            if len(states) != len(policy_targets) or len(states) != len(value_targets):
+                raise ValueError(f"Mismatched array lengths - states: {len(states)}, policy: {len(policy_targets)}, values: {len(value_targets)}")
                 
             # Verify policy targets sum to ~1 (within tolerance)
-            policy_sums = policy_array.sum(axis=1)
+            policy_sums = policy_targets.sum(axis=1)
             valid_sums = np.isclose(policy_sums, 1.0, atol=1e-3)
             if not np.all(valid_sums):
                 invalid_count = np.sum(~valid_sums)
                 print(f"Warning: {invalid_count}/{len(valid_sums)} policy targets do not sum to ~1")
                 # Normalize the policy targets
-                policy_array = policy_array / (policy_sums.reshape(-1, 1) + 1e-10)
-            
-            print(f"Generated training data: {len(states_array)} samples")
-            print(f"States shape: {states_array.shape}")
-            print(f"Policy targets shape: {policy_array.shape}")
-            print(f"Value targets shape: {value_array.shape}")
-            print(f"Policy targets sum check (should be close to 1): {policy_array[0].sum()}")
+                policy_targets = policy_targets / (policy_sums.reshape(-1, 1) + 1e-10)
             
             return {
-                'states': states_array,
-                'policy_targets': policy_array,
-                'value_targets': value_array
+                'states': states,
+                'policy_targets': policy_targets,
+                'value_targets': value_targets
             }
             
         except Exception as e:
@@ -327,14 +304,19 @@ class AlphaZeroPipeline:
             # Forward pass
             policy_logits, value_preds = self.model.predict(states)
             
-            # Calculate losses
+            # Calculate policy loss (cross entropy)
             policy_loss = self.criterion['policy'](
                 policy_logits.view(-1, policy_logits.size(-1)),
                 policy_targets.argmax(dim=1)
             )
             
+            # Ensure value predictions and targets have matching shapes
+            value_preds = value_preds.squeeze(-1)  # Remove last dimension if it's 1
+            if value_targets.dim() > 1:
+                value_targets = value_targets.squeeze(-1)  # Also remove from targets if needed
+                
             value_loss = self.criterion['value'](
-                value_preds.squeeze(),
+                value_preds,
                 value_targets
             )
             

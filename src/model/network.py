@@ -84,7 +84,11 @@ class AlphaZeroNetwork(nn.Module):
         
         Args:
             x: Input tensor of shape (batch_size, 3, board_size, board_size)
-               Channels: [player_pieces, opponent_pieces, valid_moves]
+               Channels: [current_player_pieces, opponent_pieces, valid_moves]
+               where:
+               - current_player_pieces: 1 for current player's pieces, 0 otherwise
+               - opponent_pieces: 1 for opponent's pieces, 0 otherwise
+               - valid_moves: 1 for valid moves, 0 otherwise
                
         Returns:
             Tuple of (policy_logits, value)

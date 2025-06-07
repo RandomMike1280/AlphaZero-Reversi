@@ -57,6 +57,8 @@ def main():
                        help='Directory to save tournament results')
     parser.add_argument('--verbose', action='store_true',
                        help='Print detailed game information')
+    parser.add_argument('--print-games', action='store_true',
+                       help='Print game moves during the tournament')
     
     args = parser.parse_args()
     
@@ -136,7 +138,9 @@ def main():
     
     # Run tournament
     print(f"\nStarting tournament with {args.rounds} rounds...")
-    results = arena.run_tournament(rounds=args.rounds, verbose=args.verbose)
+    results = arena.run_tournament(rounds=args.rounds, 
+                                 verbose=args.verbose,
+                                 print_games=args.print_games)
     
     # Save results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

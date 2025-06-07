@@ -376,6 +376,11 @@ class Arena:
                 print(f"\n--- After Round {round_num + 1} ---")
                 self.print_leaderboard()
         
+        # Always show final ELO update after all games are done
+        if not verbose and not print_games:
+            print("\n--- Tournament Complete ---")
+            self.print_leaderboard()
+        
         # Finalize results
         results['end_time'] = time.time()
         results['duration'] = results['end_time'] - results['start_time']

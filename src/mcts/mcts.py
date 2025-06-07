@@ -592,8 +592,9 @@ class MCTS:
         
         # Get batch predictions using the model's predict method
         policy_logits, values = self._predict_batch(states_tensor)
-        policy_probs = F.softmax(policy_logits, dim=1).numpy()
-        values = values.numpy()
+        # Move tensors to CPU before converting to NumPy
+        policy_probs = F.softmax(policy_logits, dim=1).cpu().numpy()
+        values = values.cpu().numpy()
         
         # Process each node in the batch
         for i, (node, path) in enumerate(zip(nodes, paths)):

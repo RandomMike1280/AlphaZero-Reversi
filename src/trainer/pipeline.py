@@ -377,7 +377,23 @@ class AlphaZeroPipeline:
                 num_res_blocks=self.config.model.num_res_blocks,
                 num_filters=self.config.model.num_filters
             ).to(self.device)
-            best_model.load_state_dict(torch.load(best_model_path, map_location=self.device))
+            
+            # Load the state dict
+            state_dict = torch.load(best_model_path, map_location=self.device)
+            
+            # Handle both scripted and non-scripted models
+            if any(k.startswith('_script_module.') for k in state_dict.keys()):
+                # Create a new state dict without the _script_module prefix
+                from collections import OrderedDict
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    if k.startswith('_script_module.'):
+                        new_k = k.replace('_script_module.', '')
+                        new_state_dict[new_k] = v
+                state_dict = new_state_dict
+            
+            # Load the state dict
+            best_model.load_state_dict(state_dict)
             best_model.eval()
             
             best_player = ELOPlayer(

@@ -106,7 +106,7 @@ class AlphaZeroPipeline:
     def _init_criterion(self) -> Dict[str, callable]:
         """Initialize loss functions."""
         return {
-            'policy': nn.CrossEntropyLoss(),
+            'policy': nn.KLDivLoss(reduction='batchmean'),  # Use KL divergence for policy
             'value': nn.MSELoss()
         }
     
@@ -172,6 +172,9 @@ class AlphaZeroPipeline:
         policy_targets = []
         value_targets = []
         
+        board_size = self.config.model.board_size
+        expected_policy_length = board_size * board_size + 1  # +1 for pass move
+        
         for game_idx, game in enumerate(games):
             game_states = game['states']
             game_action_probs = game['action_probs']
@@ -188,8 +191,29 @@ class AlphaZeroPipeline:
                 
             # Only use the data that has matching lengths
             for i in range(min_length):
+                # Convert action probs to fixed size if needed
+                if isinstance(game_action_probs[i], dict):
+                    # Convert dict to fixed-size vector
+                    fixed_probs = np.zeros(expected_policy_length, dtype=np.float32)
+                    for (row, col), prob in game_action_probs[i].items():
+                        if (row, col) == (-1, -1):  # Pass move
+                            fixed_probs[-1] = prob
+                        else:
+                            idx = row * board_size + col
+                            fixed_probs[idx] = prob
+                    policy_targets.append(fixed_probs)
+                else:
+                    # Already a vector, ensure it's the right size
+                    if len(game_action_probs[i]) != expected_policy_length:
+                        print(f"Warning: Unexpected policy target length {len(game_action_probs[i])}, expected {expected_policy_length}")
+                        fixed_probs = np.zeros(expected_policy_length, dtype=np.float32)
+                        min_len = min(len(game_action_probs[i]), expected_policy_length)
+                        fixed_probs[:min_len] = game_action_probs[i][:min_len]
+                        policy_targets.append(fixed_probs)
+                    else:
+                        policy_targets.append(game_action_probs[i])
+                
                 states.append(game_states[i])
-                policy_targets.append(game_action_probs[i])
                 value_targets.append(game_winners[i])
         
         # Convert to numpy arrays
@@ -197,11 +221,11 @@ class AlphaZeroPipeline:
             # Check for empty data
             if not states or not policy_targets or not value_targets:
                 raise ValueError("Empty data in one or more of: states, policy_targets, value_targets")
-                
-            # Check all policy targets have the same length
+            
+            # Verify all policy targets have the expected length
             policy_lengths = [len(p) for p in policy_targets]
             if len(set(policy_lengths)) > 1:
-                print(f"Warning: Inconsistent policy target lengths: {set(policy_lengths)}")
+                print(f"Warning: Inconsistent policy target lengths after conversion: {set(policy_lengths)}")
                 # Find the most common length
                 from collections import Counter
                 most_common_length = Counter(policy_lengths).most_common(1)[0][0]
@@ -227,6 +251,15 @@ class AlphaZeroPipeline:
                 
             if len(value_array.shape) != 1:
                 raise ValueError(f"Unexpected value targets shape: {value_array.shape}, expected (n,)")
+                
+            # Verify policy targets sum to ~1 (within tolerance)
+            policy_sums = policy_array.sum(axis=1)
+            valid_sums = np.isclose(policy_sums, 1.0, atol=1e-3)
+            if not np.all(valid_sums):
+                invalid_count = np.sum(~valid_sums)
+                print(f"Warning: {invalid_count}/{len(valid_sums)} policy targets do not sum to ~1")
+                # Normalize the policy targets
+                policy_array = policy_array / (policy_sums.reshape(-1, 1) + 1e-10)
             
             print(f"Generated training data: {len(states_array)} samples")
             print(f"States shape: {states_array.shape}")
@@ -293,12 +326,16 @@ class AlphaZeroPipeline:
             # Forward pass
             policy_logits, value_preds = self.model.predict(states)
             
-            # Calculate losses
+            # Calculate policy loss using KL divergence
+            # First, apply log_softmax to policy_logits
+            policy_log_probs = F.log_softmax(policy_logits.view(-1, policy_logits.size(-1)), dim=1)
+            # The target is already a probability distribution from MCTS
             policy_loss = self.criterion['policy'](
-                policy_logits.view(-1, policy_logits.size(-1)),
-                policy_targets.argmax(dim=1)
+                policy_log_probs,
+                policy_targets.view(-1, policy_targets.size(1))
             )
             
+            # Calculate value loss
             value_loss = self.criterion['value'](
                 value_preds.squeeze(),
                 value_targets

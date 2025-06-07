@@ -540,27 +540,47 @@ class MCTS:
                         (1.0 = proportional to visit counts, 0.0 = always choose best)
             
         Returns:
-            Tuple of (best_action, action_probs)
+            Tuple of (best_action, action_probs) where action_probs is a fixed-size vector
+            with length board_size * board_size + 1 (for pass move)
         """
         # Get visit counts
         visit_counts = self.search(game)
-        actions = list(visit_counts.keys())
-        counts = np.array([visit_counts[action] for action in actions])
+        board_size = game.size
+        
+        # Initialize fixed-size probability vector
+        action_probs = np.zeros(board_size * board_size + 1)  # +1 for pass move
+        
+        # Convert visit counts to probabilities
+        total_visits = sum(visit_counts.values())
+        if total_visits > 0:
+            for (row, col), count in visit_counts.items():
+                if (row, col) == (-1, -1):  # Pass move
+                    action_probs[-1] = count / total_visits
+                else:
+                    idx = row * board_size + col
+                    action_probs[idx] = count / total_visits
         
         # Apply temperature
-        if temperature == 0.0:
-            # Choose the action with the highest visit count
-            best_action_idx = np.argmax(counts)
-            action_probs = np.zeros(len(actions))
-            action_probs[best_action_idx] = 1.0
-        else:
+        if temperature > 0 and not np.all(action_probs == 0):
             # Apply temperature to the visit counts
-            counts = counts ** (1.0 / temperature)
-            action_probs = counts / np.sum(counts)
+            temp_probs = action_probs ** (1.0 / temperature)
+            action_probs = temp_probs / np.sum(temp_probs)
         
         # Choose an action according to the probabilities
-        best_action_idx = np.random.choice(len(actions), p=action_probs)
-        best_action = actions[best_action_idx]
+        if temperature == 0.0 or np.all(action_probs == 0):
+            # Choose the action with the highest probability
+            best_action_idx = np.argmax(action_probs)
+        else:
+            # Sample according to the probabilities
+            best_action_idx = np.random.choice(len(action_probs), p=action_probs)
+        
+        # Convert index back to action
+        if best_action_idx == len(action_probs) - 1:  # Pass move
+            best_action = (-1, -1)
+        else:
+            row = best_action_idx // board_size
+            col = best_action_idx % board_size
+            best_action = (row, col)
         
         return best_action, action_probs
     

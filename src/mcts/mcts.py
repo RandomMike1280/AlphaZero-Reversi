@@ -448,16 +448,24 @@ class MCTS:
         if self.num_gpus <= 1:
             return
             
+        # Get model configuration from the existing model
+        board_size = self.model.board_size
+        num_filters = self.model.num_filters
+        # Get number of residual blocks from the model's res_blocks ModuleList
+        num_res_blocks = len(self.model.res_blocks)
+            
         # Create model replicas for each GPU
         for i in range(self.num_gpus):
             device = torch.device(f'cuda:{i}')
-            # Create a deep copy of the model for each GPU
+            # Create a new model instance with the same configuration
             model_copy = type(self.model)(
-                board_size=self.model.board_size,
-                num_res_blocks=self.model.num_res_blocks,
-                num_filters=self.model.num_filters
+                board_size=board_size,
+                num_res_blocks=num_res_blocks,
+                num_filters=num_filters
             )
+            # Load the state dict to copy weights
             model_copy.load_state_dict(self.model.state_dict())
+            # Move to the target device
             self.models[i] = model_copy.to(device)
             self.models[i].eval()
     
